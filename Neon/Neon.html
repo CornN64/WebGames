@@ -1,0 +1,2512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>NEON — Skyway Runner</title>
+<style>
+  :root{
+    --cyan:#37f2ff;
+    --mag:#ff2e9a;
+    --amber:#ffc23d;
+    --violet:#8b5bff;
+    --bg:#04060f;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ width:100%; height:100%; overflow:hidden; background:var(--bg); }
+  body{
+    font-family:"Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    color:#dff6ff;
+    -webkit-font-smoothing:antialiased;
+    touch-action:none;
+    cursor:default;
+    user-select:none;
+  }
+  canvas#gl{ position:fixed; inset:0; width:100%; height:100%; display:block; background:#04060f; }
+
+  #ui{ position:fixed; inset:0; pointer-events:none; z-index:5; }
+
+  .screen{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:24px;
+    background:radial-gradient(ellipse at 50% 45%, rgba(10,16,40,.62) 0%, rgba(3,5,14,.93) 70%);
+    backdrop-filter:blur(3px);
+    transition:opacity .35s ease;
+  }
+  .hidden{ opacity:0; pointer-events:none !important; visibility:hidden; }
+
+  /* ---------- Title ---------- */
+  .title{
+    font-size:clamp(44px, 11vw, 116px);
+    font-weight:900;
+    letter-spacing:.14em;
+    line-height:.95;
+    font-style:italic;
+    background:linear-gradient(180deg,#ffffff 0%, var(--cyan) 42%, var(--mag) 100%);
+    -webkit-background-clip:text; background-clip:text;
+    -webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 0 22px rgba(55,242,255,.45)) drop-shadow(0 0 60px rgba(255,46,154,.28));
+  }
+  .subtitle{
+    margin-top:10px;
+    font-size:clamp(11px,1.7vw,15px);
+    letter-spacing:.62em;
+    text-indent:.62em;
+    color:#7fd8ff;
+    opacity:.85;
+    font-weight:600;
+  }
+  .rule{
+    width:min(560px,82vw); height:1px; margin:26px 0;
+    background:linear-gradient(90deg, transparent, rgba(55,242,255,.75), rgba(255,46,154,.75), transparent);
+    box-shadow:0 0 14px rgba(55,242,255,.5);
+  }
+  .blurb{ max-width:600px; font-size:15px; line-height:1.65; color:#9fc6dd; }
+  .blurb b{ color:#fff; font-weight:600; }
+
+  /* ---------- Start screen: what's on the track ---------- */
+  .legend{ width:min(680px,92vw); margin:22px 0 4px; }
+  .legendHead{
+    font-size:10px; font-weight:800; letter-spacing:.42em; text-indent:.42em;
+    color:#66c9e6; margin-bottom:14px;
+  }
+  .legendGroup{
+    font-size:9.5px; font-weight:800; letter-spacing:.3em; text-indent:.3em;
+    color:#4d7590; margin:14px 0 9px; text-align:left;
+  }
+  .legendGroup:first-of-type{ margin-top:0; }
+  .legendGrid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:9px 20px; }
+  .li{
+    display:flex; align-items:flex-start; gap:11px; text-align:left;
+    padding:8px 11px; border-radius:10px;
+    background:rgba(55,242,255,.035); border:1px solid rgba(55,242,255,.11);
+  }
+  .li svg{ flex:0 0 auto; width:20px; height:20px; margin-top:1px; color:var(--c); filter:drop-shadow(0 0 7px var(--c)); }
+  .li .txt{ min-width:0; }
+  .li b{ display:block; font-size:11px; font-weight:900; letter-spacing:.14em; color:#eafcff; }
+  .li span{ display:block; font-size:11px; line-height:1.45; color:#8fb6cf; margin-top:3px; }
+  .legendFoot{
+    margin-top:13px; font-size:11px; line-height:1.5; color:#6f93aa;
+  }
+  .legendFoot b{ color:var(--amber); font-weight:800; letter-spacing:.08em; }
+
+  /* The menu cannot scroll, so tighten the whole stack on short viewports
+     until the LAUNCH button is back in view. */
+  @media (max-height: 880px){
+    .title{ font-size:clamp(38px,8vw,78px); }
+    .subtitle{ margin-top:8px; font-size:clamp(10px,1.3vw,12.5px); }
+    .rule{ margin:16px 0; }
+    .blurb{ font-size:13.5px; line-height:1.55; max-width:560px; }
+    .legend{ margin:14px 0 2px; }
+    .legendHead{ margin-bottom:10px; }
+    .legendGroup{ margin:10px 0 7px; }
+    .legendGrid{ gap:7px 16px; }
+    .li{ padding:6px 9px; gap:9px; }
+    .li b{ font-size:10.5px; }
+    .li span{ font-size:10.5px; line-height:1.4; }
+    .li svg{ width:17px; height:17px; }
+    .legendFoot{ margin-top:10px; font-size:10.5px; }
+    .keys{ margin:14px 0 2px; }
+    .cta{ margin-top:16px; padding:13px 40px; }
+    .bestline{ margin-top:14px; }
+  }
+  @media (max-height: 700px){
+    .blurb{ display:none; }
+    .legendGroup{ margin:7px 0 5px; }
+    .legendGrid{ gap:5px 12px; }
+    .li{ padding:5px 8px; }
+    .li span{ display:none; }
+    .legendFoot{ display:none; }
+  }
+
+  .keys{ display:flex; flex-wrap:wrap; gap:10px 26px; justify-content:center; margin:22px 0 6px; }
+  .keyrow{ display:flex; align-items:center; gap:9px; font-size:12.5px; color:#8fb6cf; letter-spacing:.08em; }
+  kbd{
+    display:inline-block; min-width:30px; padding:5px 9px;
+    font:600 11.5px/1 "Consolas","SF Mono",monospace; color:#eafcff; text-align:center;
+    border:1px solid rgba(55,242,255,.45); border-bottom-width:2px; border-radius:6px;
+    background:linear-gradient(180deg, rgba(55,242,255,.16), rgba(55,242,255,.03));
+    box-shadow:0 0 12px rgba(55,242,255,.18), inset 0 0 8px rgba(55,242,255,.08);
+  }
+
+  .cta{
+    margin-top:30px; pointer-events:auto; cursor:pointer;
+    font-size:15px; font-weight:800; letter-spacing:.3em; text-indent:.3em;
+    padding:16px 46px; color:#02121a;
+    background:linear-gradient(100deg, var(--cyan), #9dffd8 45%, var(--cyan));
+    border:0; border-radius:999px;
+    box-shadow:0 0 30px rgba(55,242,255,.55), 0 0 80px rgba(55,242,255,.22);
+    animation:pulse 1.9s ease-in-out infinite;
+    transition:transform .12s ease;
+  }
+  .cta:hover{ transform:scale(1.05); }
+  .cta:active{ transform:scale(.97); }
+  @keyframes pulse{ 0%,100%{ box-shadow:0 0 30px rgba(55,242,255,.5),0 0 80px rgba(55,242,255,.18);} 50%{ box-shadow:0 0 46px rgba(255,46,154,.55),0 0 110px rgba(255,46,154,.3);} }
+
+  .bestline{ margin-top:22px; font-size:12px; letter-spacing:.28em; color:#6f93aa; }
+  .bestline span{ color:var(--amber); font-weight:800; }
+
+  /* ---------- HUD ---------- */
+  #hud{ position:absolute; inset:0; transition:opacity .25s ease; }
+  .hudbox{ position:absolute; text-shadow:0 0 14px rgba(0,0,0,.9); }
+  #scoreBox{ top:22px; left:26px; }
+  #scoreLbl{ font-size:10px; letter-spacing:.42em; color:#66c9e6; font-weight:700; }
+  #score{
+    font-size:46px; font-weight:900; line-height:1; letter-spacing:.02em;
+    font-variant-numeric:tabular-nums; color:#fff;
+    text-shadow:0 0 22px rgba(55,242,255,.75), 0 0 60px rgba(55,242,255,.3);
+  }
+  #bestHud{ font-size:11px; letter-spacing:.24em; color:#5d87a0; margin-top:5px; }
+
+  #distBox{ top:26px; left:50%; transform:translateX(-50%); text-align:center; }
+  #dist{ font-size:27px; font-weight:800; font-variant-numeric:tabular-nums; color:#eafcff; letter-spacing:.04em; }
+  #dist small{ font-size:12px; color:#6fbdd6; font-weight:600; margin-left:3px; }
+
+  #speedBox{ top:22px; right:26px; text-align:right; }
+  #speedNum{ font-size:30px; font-weight:900; font-variant-numeric:tabular-nums; color:#fff; letter-spacing:.02em; }
+  #speedNum small{ font-size:11px; color:#6fbdd6; margin-left:4px; font-weight:700; }
+  #speedBar{ width:150px; height:5px; margin-top:7px; border-radius:3px; background:rgba(255,255,255,.11); overflow:hidden; }
+  #speedFill{ height:100%; width:0%; border-radius:3px; background:linear-gradient(90deg,#37f2ff,#ffc23d 62%,#ff2e9a); box-shadow:0 0 14px rgba(55,242,255,.8); transition:width .09s linear; }
+
+  #combo{
+    position:absolute; left:26px; top:118px;
+    font-size:30px; font-weight:900; font-style:italic; letter-spacing:.02em;
+    color:var(--amber); text-shadow:0 0 24px rgba(255,194,61,.85);
+    opacity:0; transform:scale(.6); transition:opacity .16s, transform .16s;
+  }
+  #combo.on{ opacity:1; transform:scale(1); }
+
+  #shieldPip{
+    position:absolute; right:26px; top:96px; text-align:right;
+    font-size:11px; letter-spacing:.3em; font-weight:800; color:var(--violet);
+    text-shadow:0 0 18px rgba(139,91,255,.9); opacity:0; transition:opacity .2s;
+  }
+  #shieldPip.on{ opacity:1; }
+
+  /* dash readiness: a ring that refills, bottom-right of the HUD */
+  #dashPip{
+    position:absolute; right:28px; bottom:64px; width:44px; height:44px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:9px; font-weight:900; letter-spacing:.18em; color:#0a1622;
+    border-radius:50%;
+    background:conic-gradient(var(--cyan) calc(var(--dash) * 360deg), rgba(55,242,255,.16) 0deg);
+    box-shadow:0 0 22px rgba(55,242,255,.35);
+    transition:opacity .2s;
+  }
+  #dashPip i{
+    width:34px; height:34px; border-radius:50%; font-style:normal;
+    display:flex; align-items:center; justify-content:center;
+    background:#050a16; color:var(--cyan);
+    opacity:.45; transition:opacity .12s, color .12s;
+  }
+  #dashPip.ready i{ opacity:1; }
+
+  #toasts{ position:absolute; left:50%; top:33%; transform:translateX(-50%); width:100%; text-align:center; }
+  .toast{
+    font-size:clamp(20px,3.6vw,38px); font-weight:900; font-style:italic; letter-spacing:.12em;
+    color:#fff; opacity:0; animation:toastIn 1.05s cubic-bezier(.2,.9,.3,1) forwards;
+    text-shadow:0 0 26px currentColor, 0 0 70px currentColor;
+  }
+  @keyframes toastIn{
+    0%{ opacity:0; transform:scale(.55) translateY(14px); }
+    18%{ opacity:1; transform:scale(1.12) translateY(0); }
+    32%{ transform:scale(1) translateY(0); }
+    100%{ opacity:0; transform:scale(1.02) translateY(-46px); }
+  }
+
+  /* ---------- Game over ---------- */
+  #over .title{
+    font-size:clamp(38px,8vw,78px);
+    background:linear-gradient(180deg,#fff,#ff2e9a 78%);
+    -webkit-background-clip:text; background-clip:text;
+    -webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 0 26px rgba(255,46,154,.6));
+  }
+  .stats{ display:flex; gap:clamp(20px,6vw,64px); margin:34px 0 8px; }
+  .stat .k{ font-size:10px; letter-spacing:.36em; color:#6f93aa; font-weight:700; }
+  .stat .v{ font-size:clamp(26px,4.6vw,44px); font-weight:900; font-variant-numeric:tabular-nums; color:#fff; margin-top:6px; text-shadow:0 0 22px rgba(55,242,255,.5); }
+  #newRec{
+    margin-top:6px; font-size:13px; font-weight:900; letter-spacing:.34em; color:#04121a;
+    background:linear-gradient(90deg,var(--amber),#fff3c4); padding:6px 18px; border-radius:999px;
+    box-shadow:0 0 30px rgba(255,194,61,.75); display:inline-block;
+    animation:pulse .9s ease-in-out infinite;
+  }
+
+  /* Auto-return notice on the game-over screen. Any key or click restarts the
+     countdown, so it never fires while someone is still reading their stats. */
+  #overCountdown{
+    margin-top:18px; font-size:10.5px; font-weight:700; letter-spacing:.3em;
+    color:#5d87a0; opacity:0; transition:opacity .3s ease;
+  }
+  #overCountdown.on{ opacity:1; }
+  #overCountdown span{ color:var(--cyan); font-weight:900; }
+
+  #pauseCard{
+    pointer-events:auto;
+    background:rgba(6,12,28,.72); border:1px solid rgba(55,242,255,.3); border-radius:16px;
+    padding:34px 56px; box-shadow:0 0 60px rgba(0,0,0,.6);
+  }
+
+  #flash{ position:fixed; inset:0; z-index:4; pointer-events:none; opacity:0; background:#ff2e9a; mix-blend-mode:screen; }
+  #hint{
+    position:absolute; left:50%; bottom:22px; transform:translateX(-50%);
+    font-size:10.5px; letter-spacing:.3em; color:#4d7590; text-align:center;
+  }
+  #hint b{ color:#7fd8ff; font-weight:700; }
+  .scanlines{ position:fixed; inset:0; z-index:6; pointer-events:none; opacity:.45;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,.22) 0px, rgba(0,0,0,.22) 1px, transparent 1px, transparent 3px); }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="flash"></div>
+<div class="scanlines"></div>
+
+<div id="ui">
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div class="hudbox" id="scoreBox">
+      <div id="scoreLbl">SCORE</div>
+      <div id="score">0</div>
+      <div id="bestHud">BEST <span id="bestVal">0</span></div>
+    </div>
+    <div class="hudbox" id="distBox"><div id="dist">0<small>M</small></div></div>
+    <div class="hudbox" id="speedBox">
+      <div id="speedNum">0<small>KM/H</small></div>
+      <div id="speedBar"><div id="speedFill"></div></div>
+    </div>
+    <div id="combo">x2</div>
+    <div id="shieldPip">&#9670; SHIELD</div>
+    <div id="dashPip" style="--dash:1"><i>DASH</i></div>
+    <div id="toasts"></div>
+    <div id="hint"><b>SPACE</b> JUMP &nbsp;&middot;&nbsp; <b>S</b> SLIDE &nbsp;&middot;&nbsp; <b>A/D</b> STEER &nbsp;&middot;&nbsp; <b>SHIFT</b> DASH &nbsp;&middot;&nbsp; <b>P</b> PAUSE &nbsp;&middot;&nbsp; <b>M</b> MUTE</div>
+  </div>
+
+  <!-- Menu -->
+  <div id="menu" class="screen">
+    <div class="title">NEON</div>
+    <div class="subtitle">SKYWAY RUNNER &middot; SECTOR 07</div>
+    <div class="rule"></div>
+    <div class="blurb">
+      The mag-lev express never stops. Ride the <b>Skyway</b> through the living neon of a city that
+      never learned how to sleep. Weave the traffic stacks, vault the security beams, harvest <b>data-cores</b>,
+      and keep your nerve — the further you go, the faster it runs.</div>
+    <div class="blurb">(C) Walter 2026</div>
+    <div class="legend">
+      <div class="legendHead">ON THE TRACK</div>
+
+      <div class="legendGroup">HARVEST</div>
+      <div class="legendGrid">
+        <div class="li" style="--c:#ffc23d">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M10 2 16 10 10 18 4 10Z"/><path d="M4 10h12"/></svg>
+          <div class="txt"><b>DATA-CORE</b><span>Amber octahedron. +10 and raises your combo multiplier. They thread the safe lane through every hazard.</span></div>
+        </div>
+        <div class="li" style="--c:#a98bff">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="5.4"/><ellipse cx="10" cy="10" rx="9" ry="3.2"/></svg>
+          <div class="txt"><b>SHIELD</b><span>Violet bubble. Absorbs one crash, then breaks and costs you the combo.</span></div>
+        </div>
+        <div class="li" style="--c:#ffc23d">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M11 2 5 11h4l-1 7 7-10h-4Z"/></svg>
+          <div class="txt"><b>OVERDRIVE PAD</b><span>Flashing amber ramp. Brief burst of speed that smashes straight through obstacles for +50 each.</span></div>
+        </div>
+      </div>
+
+      <div class="legendGroup">AVOID</div>
+      <div class="legendGrid">
+        <div class="li" style="--c:#37f2ff">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="9" width="14" height="8" rx="1"/><path d="M3 9h14" stroke-width="2.4"/></svg>
+          <div class="txt"><b>HURDLE</b><span>Low slab with a cyan lip. Jump it &mdash; skim the edge close and it counts as a near miss.</span></div>
+        </div>
+        <div class="li" style="--c:#ff2e9a">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="2.5" width="12" height="15" rx="1"/><path d="M7 4v12M13 4v12"/></svg>
+          <div class="txt"><b>BARRIER</b><span>Tall lit panel, sometimes two lanes wide. Steer around it &mdash; it cannot be jumped.</span></div>
+        </div>
+        <div class="li" style="--c:#ff8c1a">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.5 12h17"/><path d="M4 8.5v7M16 8.5v7"/></svg>
+          <div class="txt"><b>SECURITY BEAM</b><span>Full-width bar at chest height. Slide underneath.</span></div>
+        </div>
+        <div class="li" style="--c:#ff4d3d">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M10 2.5 12 7l4.5-1-2 4.4 3.2 3.4-4.6.6-1.1 4.5-2-4.2-4.4 1.4 2.4-4.1L3.3 8l4.7.4Z"/></svg>
+          <div class="txt"><b>SAW</b><span>Spinning blade that bobs up and down. Jump clean over it.</span></div>
+        </div>
+        <div class="li" style="--c:#ff2e6a">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="6" width="3" height="10" rx="1"/><rect x="14.5" y="6" width="3" height="10" rx="1"/><path d="M5.5 11h9" stroke-dasharray="2.5 2"/></svg>
+          <div class="txt"><b>LASER</b><span>Emitters pulse the beam on and off. Time your run through the dark gaps.</span></div>
+        </div>
+        <div class="li" style="--c:#ff2e9a">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="6" y="6" width="8" height="4" rx="1"/><path d="M10 10v5"/><circle cx="10" cy="16.5" r="1.3"/><path d="M3.5 5.5h4M12.5 5.5h4"/></svg>
+          <div class="txt"><b>DRONE</b><span>Hovering unit that drifts sideways across its lane. Dodge it.</span></div>
+        </div>
+      </div>
+
+      <div class="legendFoot">
+        Clip a hazard without touching it for a <b>NEAR MISS</b> &mdash; +25 and it feeds the combo. Five in a row and the city notices.
+      </div>
+    </div>
+
+    <div class="keys">
+      <div class="keyrow"><kbd>A</kbd><kbd>D</kbd> / <kbd>&#8592;</kbd><kbd>&#8594;</kbd> STEER</div>
+      <div class="keyrow"><kbd>SPACE</kbd> / <kbd>&#8593;</kbd> JUMP</div>
+      <div class="keyrow"><kbd>S</kbd> / <kbd>&#8595;</kbd> SLIDE</div>
+      <div class="keyrow"><kbd>SHIFT</kbd> DASH</div>
+    </div>
+    <button class="cta" id="startBtn">LAUNCH</button>
+    <div class="bestline">PERSONAL BEST &nbsp;<span id="menuBest">0</span></div>
+  </div>
+
+  <!-- Pause -->
+  <div id="pause" class="screen hidden">
+    <div id="pauseCard">
+      <div style="font-size:30px;font-weight:900;letter-spacing:.3em;color:#37f2ff;text-shadow:0 0 26px rgba(55,242,255,.7)">PAUSED</div>
+      <div style="margin-top:14px;font-size:12px;letter-spacing:.24em;color:#6f93aa">PRESS <span style="color:#fff">P</span> TO RESUME</div>
+    </div>
+  </div>
+
+  <!-- Game over -->
+  <div id="over" class="screen hidden">
+    <div class="title">SIGNAL LOST</div>
+    <div id="overSub" style="margin-top:12px;font-size:12px;letter-spacing:.4em;color:#8fb6cf">RUN TERMINATED AT <span id="overDist" style="color:#fff">0</span> M</div>
+    <div class="stats">
+      <div class="stat"><div class="k">SCORE</div><div class="v" id="overScore">0</div></div>
+      <div class="stat"><div class="k">DISTANCE</div><div class="v" id="overDist2">0</div></div>
+      <div class="stat"><div class="k">CORES</div><div class="v" id="overCores">0</div></div>
+      <div class="stat"><div class="k">TOP SPEED</div><div class="v" id="overSpeed">0</div></div>
+    </div>
+    <div id="newRecWrap" style="display:none"><div id="newRec">NEW RECORD</div></div>
+    <button class="cta" id="againBtn">RUN AGAIN</button>
+    <div class="bestline">BEST &nbsp;<span id="overBest">0</span></div>
+    <div id="overCountdown">RETURNING TO TITLE IN <span id="overCount">10</span></div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/*  ==================================================================
+    NEON DRIFT — Skyway Runner
+    A single-file WebGL endless runner. No dependencies, no assets.
+    Geometry, textures, audio and the whole city are generated at runtime.
+    ================================================================== */
+
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl', { antialias: true, alpha: false, powerPreference: 'high-performance' });
+if (!gl) {
+  document.body.innerHTML = '<div style="color:#fff;font:22px sans-serif;padding:48px">WebGL is required to run NEON DRIFT.</div>';
+  throw new Error('WebGL unavailable');
+}
+
+/* ============================== MATH ============================== */
+const PI = Math.PI, TAU = PI * 2;
+const clamp = (v, a, b) => v < a ? a : (v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = t => t * t * (3 - 2 * t);
+function rand(a, b) { return a + Math.random() * (b - a); }
+function randInt(a, b) { return Math.floor(rand(a, b + 1)); }
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+// deterministic hash noise (for stable procedural detail)
+function hash1(n) { const s = Math.sin(n * 127.1) * 43758.5453; return s - Math.floor(s); }
+
+function m4() { return new Float32Array(16); }
+function perspective(out, fovy, aspect, near, far) {
+  const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+  out[0] = f / aspect; out[1] = 0; out[2] = 0; out[3] = 0;
+  out[4] = 0; out[5] = f; out[6] = 0; out[7] = 0;
+  out[8] = 0; out[9] = 0; out[10] = (far + near) * nf; out[11] = -1;
+  out[12] = 0; out[13] = 0; out[14] = 2 * far * near * nf; out[15] = 0;
+  return out;
+}
+function lookAt(out, ex, ey, ez, cx, cy, cz, ux, uy, uz) {
+  let zx = ex - cx, zy = ey - cy, zz = ez - cz;
+  let l = Math.hypot(zx, zy, zz) || 1; zx /= l; zy /= l; zz /= l;
+  let xx = uy * zz - uz * zy, xy = uz * zx - ux * zz, xz = ux * zy - uy * zx;
+  l = Math.hypot(xx, xy, xz) || 1; xx /= l; xy /= l; xz /= l;
+  const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+  out[0] = xx; out[1] = yx; out[2] = zx; out[3] = 0;
+  out[4] = xy; out[5] = yy; out[6] = zy; out[7] = 0;
+  out[8] = xz; out[9] = yz; out[10] = zz; out[11] = 0;
+  out[12] = -(xx * ex + xy * ey + xz * ez);
+  out[13] = -(yx * ex + yy * ey + yz * ez);
+  out[14] = -(zx * ex + zy * ey + zz * ez);
+  out[15] = 1;
+  return out;
+}
+function mul4(out, a, b) {
+  for (let c = 0; c < 4; c++) {
+    const b0 = b[c * 4], b1 = b[c * 4 + 1], b2 = b[c * 4 + 2], b3 = b[c * 4 + 3];
+    out[c * 4] = a[0] * b0 + a[4] * b1 + a[8] * b2 + a[12] * b3;
+    out[c * 4 + 1] = a[1] * b0 + a[5] * b1 + a[9] * b2 + a[13] * b3;
+    out[c * 4 + 2] = a[2] * b0 + a[6] * b1 + a[10] * b2 + a[14] * b3;
+    out[c * 4 + 3] = a[3] * b0 + a[7] * b1 + a[11] * b2 + a[15] * b3;
+  }
+  return out;
+}
+// R = Ry * Rx * Rz, then scale, then translate. Column-major output.
+function composeTRS(out, px, py, pz, rx, ry, rz, sx, sy, sz) {
+  const cx = Math.cos(rx), sxx = Math.sin(rx);
+  const cy = Math.cos(ry), syy = Math.sin(ry);
+  const cz = Math.cos(rz), szz = Math.sin(rz);
+  const r00 = cy * cz + syy * sxx * szz, r01 = -cy * szz + syy * sxx * cz, r02 = syy * cx;
+  const r10 = cx * szz, r11 = cx * cz, r12 = -sxx;
+  const r20 = -syy * cz + cy * sxx * szz, r21 = syy * szz + cy * sxx * cz, r22 = cy * cx;
+  out[0] = r00 * sx; out[1] = r10 * sx; out[2] = r20 * sx; out[3] = 0;
+  out[4] = r01 * sy; out[5] = r11 * sy; out[6] = r21 * sy; out[7] = 0;
+  out[8] = r02 * sz; out[9] = r12 * sz; out[10] = r22 * sz; out[11] = 0;
+  out[12] = px; out[13] = py; out[14] = pz; out[15] = 1;
+  return out;
+}
+
+/* ============================ SHADERS ============================= */
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) + '\n' + src);
+  return s;
+}
+function program(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const wrap = { p, u: {}, a: {} };
+  const nu = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < nu; i++) { const n = gl.getActiveUniform(p, i).name.replace(/\[0\]$/, ''); wrap.u[n] = gl.getUniformLocation(p, n); }
+  const na = gl.getProgramParameter(p, gl.ACTIVE_ATTRIBUTES);
+  for (let i = 0; i < na; i++) { const n = gl.getActiveAttrib(p, i).name; wrap.a[n] = gl.getAttribLocation(p, n); }
+  return wrap;
+}
+
+const PRECISION = 'precision highp float;\n';
+
+/* ---- world batched shader (all gameplay + city geometry) ---- */
+const WORLD_VS = PRECISION + `
+attribute vec3 aPos; attribute vec3 aNrm; attribute vec3 aCol; attribute vec4 aPar; attribute vec4 aObj;
+uniform mat4 uVP; uniform vec3 uCamPos;
+varying vec3 vN; varying vec3 vC; varying vec4 vP; varying vec3 vW; varying vec4 vO; varying float vD;
+void main(){
+  vec4 w = vec4(aPos,1.0);
+  vW = aPos; vN = aNrm; vC = aCol; vP = aPar; vO = aObj;
+  vD = length(aPos - uCamPos);
+  gl_Position = uVP * w;
+}`;
+
+const WORLD_FS = PRECISION + `
+uniform vec3 uLightDir; uniform vec3 uSkyTint; uniform vec3 uGroundTint;
+uniform vec3 uFogNear; uniform vec3 uFogFar; uniform float uFogDensity; uniform float uTime;
+uniform vec3 uCamPos; uniform float uGlow;
+varying vec3 vN; varying vec3 vC; varying vec4 vP; varying vec3 vW; varying vec4 vO; varying float vD;
+
+float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+
+void main(){
+  float mode = vP.z;
+  vec3 base = vC;
+  float emis = vP.x;
+  float alpha = vP.y;
+  float gloss = vP.w;
+
+  vec3 n = normalize(vN);
+  float ndl = max(dot(n, normalize(uLightDir)), 0.0);
+  float hemi = n.y * 0.5 + 0.5;
+
+  // generous ambient so silhouette shapes never collapse into black voids
+  vec3 light = uSkyTint * (0.42 + hemi * 0.72) + vec3(1.0, 0.86, 0.72) * ndl * 0.70
+             + vec3(0.16, 0.10, 0.26);
+  vec3 col = base * light;
+
+  // rim light (neon bounce from the city)
+  vec3 v = normalize(uCamPos - vW);
+  float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0);
+  col += rim * mix(vec3(0.10,0.45,0.62), vec3(0.55,0.08,0.38), 0.5 + 0.5*sin(vW.x*0.06)) * (0.55 + emis*1.2);
+
+  // ---- procedural facades: mode 1 = window grid, 2 = holo stripes, 3 = hazard ----
+  if (mode > 0.5 && mode < 1.5) {
+    // Facades are sampled in OBJECT space (vO, metres). Sampling world space
+    // painted the windows onto space instead of onto the tower: on the ±x walls
+    // (the ones facing the track) world x is constant, so the grid never
+    // travelled with the building and read as a stationary texture.
+    vec3 an = abs(n);
+    float sw = step(an.z, an.x);            // 1.0 on the +/-x walls (track-facing)
+    vec2 g = mix(vec2(vO.x*0.85, vO.y*0.70), vec2(vO.z*0.85, vO.y*0.70), sw);
+    float dep = mix(vO.z, vO.x, sw);        // depth into the wall, keeps faces unique
+    vec2 cell = floor(g) + vO.w;            // vO.w = per-instance seed
+    float on = step(0.50, h21(cell + floor(dep*0.53)));
+    float flick = step(0.988, h21(cell*1.7 + floor(uTime*0.6)));
+    on = on * (1.0 - flick*0.7);
+    vec2 f = fract(g);
+    float pane = step(0.16, f.x) * step(f.x, 0.84) * step(0.20, f.y) * step(f.y, 0.86);
+    vec3 wc = mix(vec3(1.0,0.74,0.32), vec3(0.35,0.95,1.0), h21(cell*3.3));
+    wc = mix(wc, vec3(1.0,0.28,0.62), step(0.87, h21(cell*0.91)));
+    float face = step(0.5, abs(n.x) + abs(n.z));
+    float win = on * pane * face;
+    // windows resolve up close and melt into a flat tower far away (no aliasing)
+    float fade = 1.0 - smoothstep(50.0, 185.0, vD);
+    col += wc * win * (1.45 + 0.4*sin(uTime*2.0 + cell.x)) * fade;
+  } else if (mode > 1.5 && mode < 2.5) {
+    float s = sin(vW.y*3.0 - uTime*4.0);
+    col += base * (0.5 + 0.5*s) * 1.6;
+    col += base * pow(max(0.0, s), 12.0) * 3.0;
+  } else if (mode > 2.5 && mode < 3.5) {
+    float st = step(0.5, fract((vW.x + vW.z + vW.y) * 1.2 - uTime*1.2));
+    col = mix(col, vec3(1.0,0.85,0.15), st*0.85);
+    emis = max(emis, 0.55);
+  }
+
+  col = mix(col, base * 1.9, emis);
+  col += base * emis * emis * 1.1;
+
+  // specular kick
+  vec3 hv = normalize(v + normalize(uLightDir));
+  col += vec3(1.0,0.95,0.9) * pow(max(dot(n,hv),0.0), 42.0) * gloss;
+
+  // fog. uGlow is 0 for the solid pass and 1 for the additive bloom pass:
+  // glow fades to black with distance so far-off neon melts into the haze
+  // instead of stacking into a white wall.
+  float f = 1.0 - exp(-pow(vD * uFogDensity, 2.0));
+  float up = clamp(vW.y*0.012 + 0.35, 0.0, 1.0);
+  vec3 fog = mix(uFogFar, uFogNear, up);
+  col = mix(col, fog, clamp(f,0.0,1.0));
+  col = mix(col, col * exp(-pow(vD * uFogDensity * 1.25, 2.0)) * 0.34, uGlow);
+
+  gl_FragColor = vec4(col, alpha);
+}`;
+
+/* ---- road / skyway surface ---- */
+const ROAD_VS = PRECISION + `
+attribute vec3 aPos;
+uniform mat4 uVP;
+varying vec3 vW;
+void main(){ vW = aPos; gl_Position = uVP * vec4(aPos,1.0); }`;
+
+const ROAD_FS = PRECISION + `
+uniform float uScroll; uniform float uTime; uniform vec3 uAccent; uniform vec3 uAccent2;
+uniform float uBoost; uniform float uRoadW; uniform float uSpeed01;
+varying vec3 vW;
+float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+
+/*
+ * ANTI-MOIRE. The skyway is seen almost edge-on, so screen rows compress
+ * nonlinearly with distance: near the horizon one row spans tens of metres.
+ * Any pattern repeating along z drops below a pixel there and aliases into
+ * thick horizontal bars (it used to look like ledges across the road).
+ *
+ * On a ground plane a pattern of period p stays above ~2px only while
+ *     d < sqrt(K * p)
+ * so each repeating feature is faded out past its own safe distance.
+ */
+float safeRange(float period){ return sqrt(2600.0 * period); }
+/* 1 near the camera, 0 past the cutoff (edges kept in increasing order) */
+float nearFade(float d, float hold, float cutoff){ return 1.0 - smoothstep(hold, cutoff, d); }
+
+void main(){
+  float x = vW.x, z = vW.z;
+  float zw = z + uScroll;              // world-travelling coordinate
+  float edge = uRoadW;
+  float d = -z;
+
+  // ---- base deck: dark glass, so the neon markings on it actually pop ----
+  vec3 col = vec3(0.052, 0.062, 0.112);
+  col += vec3(0.035, 0.055, 0.095) * exp(-d * 0.045);   // pool of light near the rider
+
+  // panel seams: fine grid, faded out before it can alias
+  float seamZ = 1.0 - smoothstep(0.0, 0.05, abs(fract(zw * 0.5) - 0.5) * 2.0);
+  float seamX = 1.0 - smoothstep(0.0, 0.05, abs(fract(x * 0.5) - 0.5) * 2.0);
+  float seam = max(seamZ * 0.55, seamX * 0.35);
+  seam *= nearFade(d, safeRange(2.0) * 0.35, safeRange(2.0));
+  col += seam * vec3(0.035, 0.075, 0.135);
+
+  // scrolling energy ticks across the deck (the main speed cue)
+  float tick = pow(max(0.0, sin(zw * 1.05 - uTime * 9.0)), 90.0);
+  tick *= nearFade(d, safeRange(6.0) * 0.35, safeRange(6.0));
+  col += uAccent * tick * (0.22 + uSpeed01 * 0.30);
+
+  // lane dividers: they widen with distance so the three lanes stay legible far
+  // down the skyway instead of collapsing to nothing
+  float lane = 0.0;
+  for (int i = -1; i <= 1; i += 2) {
+    float lx = float(i) * (edge * 0.325);
+    lane = max(lane, 1.0 - smoothstep(0.0, 0.09 + d * 0.010, abs(x - lx)));
+  }
+  // dashes repeat along z, so they fade out and the line becomes solid
+  float dash = smoothstep(0.34, 0.46, fract(zw * 0.2));
+  float dashKeep = nearFade(d, safeRange(5.0) * 0.45, safeRange(5.0));
+  col += mix(uAccent, vec3(1.0), 0.5) * lane * mix(1.0, dash, dashKeep) * 1.15;
+
+  // centre pulse strip
+  float centre = 1.0 - smoothstep(0.0, 0.08 + d * 0.009, abs(x));
+  float pulse = smoothstep(0.60, 0.66, fract(zw * 0.14 - uTime * 0.15));
+  col += mix(uAccent, uAccent2, 0.5 + 0.5 * sin(zw * 0.05)) * centre * mix(1.0, pulse, dashKeep) * 0.85;
+
+  // glowing edge rails
+  float e = abs(x) - edge;
+  col += uAccent2 * (1.0 - smoothstep(0.0, 0.26, abs(e))) * step(-0.08, e) * 1.35;
+  col += uAccent2 * exp(-abs(e) * 0.7) * step(e, 0.4) * 0.28;
+
+  // outside the deck: fall into the void
+  col = mix(col, vec3(0.010, 0.012, 0.030), smoothstep(0.0, 1.4, abs(x) - edge));
+
+  // boost lane tint
+  float bp = smoothstep(0.44, 0.56, fract(zw * 0.08 - uTime * 0.6)) * exp(-abs(x) * 0.34);
+  col += vec3(1.0, 0.72, 0.15) * bp * uBoost * 0.45 * dashKeep;
+
+  // wet reflection sheen stretching toward the horizon
+  float sheen = exp(-abs(x) * 0.16) * smoothstep(-150.0, -10.0, z);
+  col += mix(uAccent, uAccent2, 0.5 + 0.5 * sin(x * 0.2 + uTime * 0.4)) * sheen * 0.055;
+
+  // speckle grit — very high frequency, so it dies out almost immediately
+  float g = h21(floor(vec2(x * 6.0, zw * 6.0)));
+  col += g * 0.014 * nearFade(d, safeRange(0.17) * 0.3, safeRange(0.17));
+
+  // distance fade into the night haze
+  col = mix(col, vec3(0.028, 0.018, 0.058), smoothstep(45.0, 175.0, d));
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+/* ---- sky ---- */
+const SKY_VS = PRECISION + `
+attribute vec2 aXY;
+varying vec2 vUV;
+void main(){ vUV = aXY*0.5+0.5; gl_Position = vec4(aXY,0.999,1.0); }`;
+
+const SKY_FS = PRECISION + `
+uniform vec3 uFwd; uniform vec3 uRight; uniform vec3 uUp;
+uniform float uAspect; uniform float uTanHalf; uniform float uTime; uniform float uSpeed01;
+varying vec2 vUV;
+float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
+  float a = h21(i), b = h21(i+vec2(1.0,0.0)), c = h21(i+vec2(0.0,1.0)), d = h21(i+vec2(1.0,1.0));
+  return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+}
+float fbm(vec2 p){ float s=0.0, a=0.5; for(int i=0;i<4;i++){ s += a*noise(p); p*=2.03; a*=0.5; } return s; }
+void main(){
+  vec2 ndc = vUV*2.0-1.0;
+  vec3 dir = normalize(uFwd + uRight*(ndc.x*uAspect*uTanHalf) + uUp*(ndc.y*uTanHalf));
+  float y = dir.y;
+
+  // base atmosphere
+  vec3 top    = vec3(0.012, 0.016, 0.055);
+  vec3 mid    = vec3(0.10, 0.03, 0.20);
+  vec3 horizon= vec3(0.62, 0.10, 0.42);
+  vec3 low    = vec3(0.012, 0.008, 0.028);
+  vec3 col = mix(mid, top, smoothstep(0.05, 0.75, y));
+  col = mix(col, horizon, pow(max(0.0, 1.0 - abs(y)*3.4), 3.0));
+  col = mix(col, low, 1.0 - smoothstep(-0.4, -0.02, y));
+
+  // aurora ribbons
+  float ax = dir.x / (abs(dir.y)+0.35);
+  float rib = fbm(vec2(ax*0.7 + uTime*0.05, y*2.2 - uTime*0.02));
+  float band = smoothstep(0.05, 0.6, y) * (1.0 - smoothstep(0.3, 0.85, y));
+  col += vec3(0.10, 0.85, 0.75) * pow(rib, 2.4) * band * 0.75;
+  col += vec3(0.85, 0.15, 0.65) * pow(fbm(vec2(ax*0.5 - uTime*0.07, y*3.0)), 3.0) * band * 0.55;
+
+  // stars
+  vec2 sp = vec2(atan(dir.z, dir.x)*3.2, y*7.0);
+  vec2 gi = floor(sp*14.0);
+  float st = h21(gi);
+  if (st > 0.982 && y > 0.02) {
+    vec2 fp = fract(sp*14.0) - 0.5;
+    float d = length(fp);
+    float tw = 0.55 + 0.45*sin(uTime*3.0 + st*90.0);
+    col += vec3(0.85,0.92,1.0) * (1.0 - smoothstep(0.0, 0.30, d)) * tw * 1.6 * smoothstep(0.02,0.25,y);
+  }
+
+  // ringed gas giant, parked low on the horizon
+  vec3 pd = normalize(vec3(-0.42, 0.20, -1.0));
+  float pa = dot(dir, pd);
+  vec2 pr = vec2(dot(dir, normalize(cross(pd, vec3(0.0,1.0,0.0)))), dot(dir, cross(pd, normalize(cross(pd, vec3(0.0,1.0,0.0))))));
+  float rr = length(pr);
+  if (pa > 0.0) {
+    float disc = 1.0 - smoothstep(0.092, 0.098, rr);
+    vec3 pc = mix(vec3(0.95,0.42,0.72), vec3(0.35,0.20,0.62), smoothstep(-0.09,0.09,pr.y));
+    pc = mix(pc, vec3(1.0,0.75,0.55), pow(max(0.0,1.0-abs(pr.x+0.03)*7.0),2.0)*0.4);
+    float stripes = fbm(vec2(pr.x*7.0, pr.y*26.0 - uTime*0.01));
+    pc *= 0.72 + stripes*0.6;
+    pc *= 0.55 + 0.55*smoothstep(-0.10, 0.06, pr.x);
+    col = mix(col, pc, disc);
+    float ring = (1.0 - smoothstep(0.0, 0.028, abs(rr - 0.175))) * 0.9 +
+                 (1.0 - smoothstep(0.0, 0.014, abs(rr - 0.205))) * 0.6;
+    float ringMask = smoothstep(0.098, 0.11, rr);
+    col += mix(vec3(1.0,0.65,0.85), vec3(0.5,0.85,1.0), rr*3.0) * ring * ringMask * 0.85;
+    col += vec3(1.0,0.5,0.8) * (1.0 - smoothstep(0.09, 0.14, rr)) * 0.35;
+  }
+
+  // city light pollution from below (kept tight to the horizon so it does not
+  // wash out the road deck, which occupies the lower screen)
+  float below = 1.0 - smoothstep(-0.55, -0.02, y);
+  col += vec3(1.0,0.35,0.55) * below * 0.16;
+  col += vec3(0.2,0.7,1.0) * pow(below, 2.0) * 0.10;
+
+  // speed-reactive vignette + horizon streaks
+  float streak = pow(max(0.0, 1.0 - abs(y)*7.0), 3.0) * pow(abs(ndc.x), 2.0);
+  col += mix(vec3(0.2,0.9,1.0), vec3(1.0,0.2,0.6), 0.5+0.5*sin(uTime*0.5)) * streak * uSpeed01 * 0.5;
+
+  float vig = 1.0 - 0.45*dot(ndc,ndc);
+  col *= vig;
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const WPROG = program(WORLD_VS, WORLD_FS);
+const RPROG = program(ROAD_VS, ROAD_FS);
+const SPROG = program(SKY_VS, SKY_FS);
+
+/* ============================== MESHES ============================= */
+/* Vertex layout: pos(3) nrm(3) col(3) params(4: emis, alpha, mode, gloss)
+   obj(4: local position in metres + per-instance seed) = 20 floats (80 bytes) */
+const STRIDE = 20;
+function makeMesh(pos, nrm, col, idx) {
+  const n = pos.length / 3;
+  const data = new Float32Array(n * STRIDE);
+  for (let i = 0; i < n; i++) {
+    const o = i * STRIDE;
+    data[o] = pos[i * 3]; data[o + 1] = pos[i * 3 + 1]; data[o + 2] = pos[i * 3 + 2];
+    data[o + 3] = nrm[i * 3]; data[o + 4] = nrm[i * 3 + 1]; data[o + 5] = nrm[i * 3 + 2];
+    data[o + 6] = col ? col[i * 3] : 1; data[o + 7] = col ? col[i * 3 + 1] : 1; data[o + 8] = col ? col[i * 3 + 2] : 1;
+  }
+  return { data, idx: new Uint16Array(idx), count: idx.length };
+}
+
+/* Primitives are authored in Y-up world space, unit-sized (box = 1^3,
+   spheres/torus = 1 across), CCW winding seen from outside. */
+function boxMesh() {
+  const p = [], nn = [], c = [], ix = [];
+  const faces = [
+    [[0, 1, 0], [[-.5, .5, .5], [.5, .5, .5], [.5, .5, -.5], [-.5, .5, -.5]], 1.00],
+    [[0, -1, 0], [[-.5, -.5, -.5], [.5, -.5, -.5], [.5, -.5, .5], [-.5, -.5, .5]], 0.34],
+    [[1, 0, 0], [[.5, -.5, .5], [.5, -.5, -.5], [.5, .5, -.5], [.5, .5, .5]], 0.78],
+    [[-1, 0, 0], [[-.5, -.5, -.5], [-.5, -.5, .5], [-.5, .5, .5], [-.5, .5, -.5]], 0.54],
+    [[0, 0, 1], [[-.5, -.5, .5], [.5, -.5, .5], [.5, .5, .5], [-.5, .5, .5]], 0.68],
+    [[0, 0, -1], [[.5, -.5, -.5], [-.5, -.5, -.5], [-.5, .5, -.5], [.5, .5, -.5]], 0.46]
+  ];
+  for (const [nrm, verts, sh] of faces) {
+    const base = p.length / 3;
+    for (const v of verts) { p.push(v[0], v[1], v[2]); nn.push(nrm[0], nrm[1], nrm[2]); c.push(sh, sh, sh); }
+    ix.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  return makeMesh(p, nn, c, ix);
+}
+function sphereMesh(seg, ring) {
+  const p = [], nn = [], c = [], ix = [];
+  for (let y = 0; y <= ring; y++) {
+    const phi = (y / ring) * PI, sp = Math.sin(phi);
+    for (let x = 0; x <= seg; x++) {
+      const th = (x / seg) * TAU;
+      const nx = Math.cos(th) * sp, ny = Math.cos(phi), nz = Math.sin(th) * sp;
+      p.push(nx * .5, ny * .5, nz * .5);
+      nn.push(nx, ny, nz);
+      const b = 0.68 + 0.32 * (ny * .5 + .5);
+      c.push(b, b, b);
+    }
+  }
+  for (let y = 0; y < ring; y++) for (let x = 0; x < seg; x++) {
+    const a = y * (seg + 1) + x, b = a + seg + 1;
+    ix.push(a, a + 1, b, b, a + 1, b + 1);
+  }
+  return makeMesh(p, nn, c, ix);
+}
+function octaMesh() {
+  const v = [[0, 1, 0], [0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
+  const f = [[0, 4, 2], [0, 2, 5], [0, 5, 3], [0, 3, 4], [1, 2, 4], [1, 5, 2], [1, 3, 5], [1, 4, 3]];
+  const p = [], nn = [], c = [], ix = [];
+  for (const t of f) {
+    const a = v[t[0]], b = v[t[1]], d = v[t[2]];
+    let nx = (b[1] - a[1]) * (d[2] - a[2]) - (b[2] - a[2]) * (d[1] - a[1]);
+    let ny = (b[2] - a[2]) * (d[0] - a[0]) - (b[0] - a[0]) * (d[2] - a[2]);
+    let nz = (b[0] - a[0]) * (d[1] - a[1]) - (b[1] - a[1]) * (d[0] - a[0]);
+    const l = Math.hypot(nx, ny, nz) || 1;
+    const base = p.length / 3;
+    for (const q of [a, b, d]) { p.push(q[0] * .5, q[1] * .5, q[2] * .5); nn.push(nx / l, ny / l, nz / l); c.push(1, 1, 1); }
+    ix.push(base, base + 1, base + 2);
+  }
+  return makeMesh(p, nn, c, ix);
+}
+function cylMesh(seg, caps) {
+  const p = [], nn = [], c = [], ix = [];
+  for (let i = 0; i < seg; i++) {
+    const a0 = i / seg * TAU, a1 = (i + 1) / seg * TAU;
+    const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+    const nx = (c0 + c1) * .5, nz = (s0 + s1) * .5;
+    const b = p.length / 3;
+    p.push(c0 * .5, -.5, s0 * .5, c1 * .5, -.5, s1 * .5, c1 * .5, .5, s1 * .5, c0 * .5, .5, s0 * .5);
+    for (let k = 0; k < 4; k++) { nn.push(nx, 0, nz); const sh = k >= 2 ? 0.95 : 0.60; c.push(sh, sh, sh); }
+    ix.push(b, b + 2, b + 1, b + 2, b + 3, b + 1);
+    if (caps) {
+      let t = p.length / 3;
+      p.push(0, .5, 0, c1 * .5, .5, s1 * .5, c0 * .5, .5, s0 * .5);
+      nn.push(0, 1, 0, 0, 1, 0, 0, 1, 0); c.push(1, 1, 1, 1, 1, 1, 1, 1, 1);
+      ix.push(t, t + 1, t + 2);
+      t = p.length / 3;
+      p.push(0, -.5, 0, c0 * .5, -.5, s0 * .5, c1 * .5, -.5, s1 * .5);
+      nn.push(0, -1, 0, 0, -1, 0, 0, -1, 0); c.push(.4, .4, .4, .4, .4, .4, .4, .4, .4);
+      ix.push(t, t + 1, t + 2);
+    }
+  }
+  return makeMesh(p, nn, c, ix);
+}
+function torusMesh(ringSeg, tubeSeg, r) {
+  const p = [], nn = [], c = [], ix = [];
+  for (let i = 0; i <= ringSeg; i++) {
+    const u = i / ringSeg * TAU, cu = Math.cos(u), su = Math.sin(u);
+    for (let j = 0; j <= tubeSeg; j++) {
+      const v = j / tubeSeg * TAU, cv = Math.cos(v), sv = Math.sin(v);
+      p.push((.5 + r * cv) * cu, r * sv, (.5 + r * cv) * su);
+      nn.push(cu * cv, sv, su * cv);
+      const b = 0.70 + 0.30 * cv; c.push(b, b, b);
+    }
+  }
+  for (let i = 0; i < ringSeg; i++) for (let j = 0; j < tubeSeg; j++) {
+    const a = i * (tubeSeg + 1) + j, b = a + tubeSeg + 1;
+    ix.push(a, a + 1, b, b, a + 1, b + 1);
+  }
+  return makeMesh(p, nn, c, ix);
+}
+function coneMesh(seg) {
+  const p = [], nn = [], c = [], ix = [];
+  for (let i = 0; i < seg; i++) {
+    const a0 = i / seg * TAU, a1 = (i + 1) / seg * TAU;
+    const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+    let nx = (c0 + c1) * .5, nz = (s0 + s1) * .5, ny = 0.55;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    const b = p.length / 3;
+    p.push(0, .5, 0, c1 * .5, -.5, s1 * .5, c0 * .5, -.5, s0 * .5);
+    for (let k = 0; k < 3; k++) { nn.push(nx / l, ny / l, nz / l); c.push(1, 1, 1); }
+    ix.push(b, b + 1, b + 2);
+    const bo = p.length / 3;
+    p.push(0, -.5, 0, c0 * .5, -.5, s0 * .5, c1 * .5, -.5, s1 * .5);
+    nn.push(0, -1, 0, 0, -1, 0, 0, -1, 0); c.push(.45, .45, .45, .45, .45, .45, .45, .45, .45);
+    ix.push(bo, bo + 1, bo + 2);
+  }
+  return makeMesh(p, nn, c, ix);
+}
+
+const MESH = {
+  box: boxMesh(),
+  sphere: sphereMesh(14, 9),
+  ball: sphereMesh(8, 6),
+  octa: octaMesh(),
+  cyl: cylMesh(10, true),
+  torus: torusMesh(18, 7, 0.13),
+  cone: coneMesh(10)
+};
+
+/* ============================= BATCHER ============================= */
+class Batch {
+  constructor(maxVerts) {
+    this.cap = maxVerts;
+    this.buf = new Float32Array(maxVerts * STRIDE);
+    // index:vertex ratio is ~5 for the sphere/torus, so budget generously
+    this.idx = new Uint16Array(maxVerts * 6);
+    this.v = 0; this.i = 0;
+    this.vbo = gl.createBuffer();
+    this.ibo = gl.createBuffer();
+    this.m = m4();
+  }
+  reset() { this.v = 0; this.i = 0; }
+  /** push a mesh transformed by (pos, rot, scale) with material params */
+  push(mesh, px, py, pz, rx, ry, rz, sx, sy, sz, r, g, b, emis, alpha, mode, gloss) {
+    composeTRS(this.m, px, py, pz, rx, ry, rz, sx, sy, sz);
+    const M = this.m, src = mesh.data, out = this.buf;
+    const n = mesh.data.length / STRIDE;
+    if (this.v + n > this.cap || this.i + mesh.count > this.idx.length) return;
+    let o = this.v * STRIDE;
+    const m0 = M[0], m1 = M[1], m2 = M[2], m4 = M[4], m5 = M[5], m6 = M[6],
+      m8 = M[8], m9 = M[9], m10 = M[10], m12 = M[12], m13 = M[13], m14 = M[14];
+    // per-instance facade seed: scale is constant across a push, so hashing it
+    // de-clones towers without needing a new argument at every call site
+    const seed = hash1(sx * 12.9898 + sy * 78.233 + sz * 151.719) * 91.7;
+    for (let k = 0; k < n; k++) {
+      const s = k * STRIDE;
+      const x = src[s], y = src[s + 1], z = src[s + 2];
+      out[o] = m0 * x + m4 * y + m8 * z + m12;
+      out[o + 1] = m1 * x + m5 * y + m9 * z + m13;
+      out[o + 2] = m2 * x + m6 * y + m10 * z + m14;
+      const nx = src[s + 3], ny = src[s + 4], nz = src[s + 5];
+      let tx = m0 * nx + m4 * ny + m8 * nz, ty = m1 * nx + m5 * ny + m9 * nz, tz = m2 * nx + m6 * ny + m10 * nz;
+      const il = 1 / (Math.hypot(tx, ty, tz) || 1);
+      out[o + 3] = tx * il; out[o + 4] = ty * il; out[o + 5] = tz * il;
+      out[o + 6] = src[s + 6] * r; out[o + 7] = src[s + 7] * g; out[o + 8] = src[s + 8] * b;
+      out[o + 9] = emis; out[o + 10] = alpha; out[o + 11] = mode; out[o + 12] = gloss;
+      // Object-space position in metres: the shader samples facades with this so a
+      // pattern stays glued to the instance instead of sliding over it. The w slot
+      // carries a seed derived from the (constant) scale, so towers of the same
+      // size do not all clone the same window layout.
+      out[o + 13] = x * sx; out[o + 14] = y * sy; out[o + 15] = z * sz;
+      out[o + 16] = seed;
+      o += STRIDE;
+    }
+    const base = this.v;
+    for (let k = 0; k < mesh.count; k++) this.idx[this.i++] = mesh.idx[k] + base;
+    this.v += n;
+  }
+  upload() {
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, this.buf.subarray(0, this.v * STRIDE), gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, this.idx.subarray(0, this.i), gl.DYNAMIC_DRAW);
+  }
+  bind(prg) {
+    const st = STRIDE * 4;
+    gl.enableVertexAttribArray(prg.a.aPos); gl.vertexAttribPointer(prg.a.aPos, 3, gl.FLOAT, false, st, 0);
+    gl.enableVertexAttribArray(prg.a.aNrm); gl.vertexAttribPointer(prg.a.aNrm, 3, gl.FLOAT, false, st, 12);
+    gl.enableVertexAttribArray(prg.a.aCol); gl.vertexAttribPointer(prg.a.aCol, 3, gl.FLOAT, false, st, 24);
+    gl.enableVertexAttribArray(prg.a.aPar); gl.vertexAttribPointer(prg.a.aPar, 4, gl.FLOAT, false, st, 36);
+    gl.enableVertexAttribArray(prg.a.aObj); gl.vertexAttribPointer(prg.a.aObj, 4, gl.FLOAT, false, st, 52);
+  }
+  draw(prg) {
+    if (!this.i) return;
+    this.upload();                       // binds this.vbo + this.ibo (element binding is global)
+    this.bind(prg);
+    gl.drawElements(gl.TRIANGLES, this.i, gl.UNSIGNED_SHORT, 0);
+  }
+}
+
+const opaque = new Batch(30000);
+const glow = new Batch(26000);
+
+/**
+ * Additive neon fades into the fog long before these distances, so distant
+ * glow pushes are skipped. Without this the glow batch overflows and the
+ * whole screen washes out.
+ */
+function makeGlowGate(minZ) {
+  return {
+    push(mesh, px, py, pz, rx, ry, rz, sx, sy, sz, r, g, b, e, a, m, gs) {
+      if (pz > minZ) glow.push(mesh, px, py, pz, rx, ry, rz, sx, sy, sz, r, g, b, e, a, m, gs);
+    }
+  };
+}
+const glowProps = makeGlowGate(-150);
+const glowObjs = makeGlowGate(-215);
+
+/* scratch matrix for the road quad */
+const VP = m4(), PROJ = m4(), VIEW = m4();
+/* =============================== AUDIO ==============================
+   Fully synthesised: procedural music bed + reactive SFX. No files.   */
+const Audio_ = {
+  ctx: null, master: null, musicGain: null, sfxGain: null, muted: false,
+  bpm: 118, step: 0, nextTime: 0, running: false, intensity: 0,
+  init() {
+    if (this.ctx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain(); this.master.gain.value = 0.15;
+    const comp = this.ctx.createDynamicsCompressor();
+    comp.threshold.value = -14; comp.ratio.value = 8;
+    this.master.connect(comp); comp.connect(this.ctx.destination);
+    this.musicGain = this.ctx.createGain(); this.musicGain.gain.value = 0.30; this.musicGain.connect(this.master);
+    this.sfxGain = this.ctx.createGain(); this.sfxGain.gain.value = 0.55; this.sfxGain.connect(this.master);
+
+    // reverb-ish delay bus
+    this.delay = this.ctx.createDelay(1.0); this.delay.delayTime.value = 0.28;
+    this.fb = this.ctx.createGain(); this.fb.gain.value = 0.34;
+    this.delayWin = this.ctx.createGain(); this.delayWin.gain.value = 0.30;
+    this.delay.connect(this.fb); this.fb.connect(this.delay);
+    this.delay.connect(this.delayWin); this.delayWin.connect(this.master);
+  },
+  resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); },
+  setMuted(m) { this.muted = m; if (this.master) this.master.gain.value = m ? 0 : 0.85; },
+  tone(freq, dur, type, vol, slideTo, delayBus) {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t + dur);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol == null ? 0.3 : vol, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.sfxGain);
+    if (delayBus) g.connect(this.delay);
+    o.start(t); o.stop(t + dur + 0.02);
+  },
+  noise(dur, vol, hp, lp) {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime, n = Math.floor(this.ctx.sampleRate * dur);
+    const buf = this.ctx.createBuffer(1, n, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    const s = this.ctx.createBufferSource(); s.buffer = buf;
+    const f1 = this.ctx.createBiquadFilter(); f1.type = 'highpass'; f1.frequency.value = hp || 800;
+    const f2 = this.ctx.createBiquadFilter(); f2.type = 'lowpass'; f2.frequency.value = lp || 9000;
+    const g = this.ctx.createGain(); g.gain.value = vol == null ? 0.25 : vol;
+    s.connect(f1); f1.connect(f2); f2.connect(g); g.connect(this.sfxGain);
+    s.start(t);
+  },
+  jump() { this.tone(300, 0.20, 'triangle', 0.26, 780); this.noise(0.10, 0.10, 1600, 6000); },
+  land() { this.noise(0.14, 0.20, 120, 1400); this.tone(90, 0.12, 'sine', 0.22, 48); },
+  slide() { this.noise(0.42, 0.16, 2400, 8000); },
+  coin(pitchStep) {
+    const base = 880 * Math.pow(1.0595, Math.min(pitchStep || 0, 24));
+    this.tone(base, 0.09, 'square', 0.13);
+    this.tone(base * 1.5, 0.16, 'square', 0.10, null, true);
+  },
+  crash() {
+    this.noise(0.55, 0.42, 60, 3200);
+    this.tone(160, 0.5, 'sawtooth', 0.30, 38);
+    this.tone(70, 0.7, 'square', 0.22, 30);
+  },
+  shield() { this.tone(420, 0.5, 'sine', 0.24, 1250, true); this.tone(630, 0.6, 'triangle', 0.14, 1600, true); },
+  boost() { this.tone(180, 0.45, 'sawtooth', 0.20, 900); this.noise(0.4, 0.16, 500, 5000); },
+  near() { this.tone(1400, 0.06, 'sine', 0.05, 2200, true); },
+  milestone(n) {
+    const s = [0, 4, 7, 12][n % 4];
+    this.tone(523 * Math.pow(2, s / 12), 0.5, 'triangle', 0.20, null, true);
+  },
+  /* --- step sequencer: driving synthwave loop that thickens with speed --- */
+  startMusic() {
+    if (!this.ctx) return;
+    this.running = true; this.step = 0; this.nextTime = this.ctx.currentTime + 0.06;
+  },
+  stopMusic() { this.running = false; },
+  musicTick() {
+    if (!this.ctx || !this.running || this.muted) return;
+    const spb = 60 / (this.bpm + this.intensity * 34) / 4;  // 16th notes
+    while (this.nextTime < this.ctx.currentTime + 0.16) {
+      const t = this.nextTime, s = this.step % 32;
+      const root = [0, 0, -3, -5][Math.floor(this.step / 32) % 4];
+      const send = (osc, type, freq, t0, dur, vol, dest) => {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = type; o.frequency.setValueAtTime(freq, t0);
+        g.gain.setValueAtTime(0, t0);
+        g.gain.linearRampToValueAtTime(vol, t0 + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        o.connect(g); g.connect(dest || this.musicGain);
+        o.start(t0); o.stop(t0 + dur + 0.02);
+      };
+      const midi = n => 440 * Math.pow(2, (n - 69) / 12);
+      // kick
+      if (s % 4 === 0) {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'sine'; o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.11);
+        g.gain.setValueAtTime(0.9, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+        o.connect(g); g.connect(this.musicGain); o.start(t); o.stop(t + 0.2);
+      }
+      // hats
+      if (s % 2 === 1) {
+        const n = Math.floor(this.ctx.sampleRate * 0.03);
+        const b = this.ctx.createBuffer(1, n, this.ctx.sampleRate), d = b.getChannelData(0);
+        for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+        const src = this.ctx.createBufferSource(); src.buffer = b;
+        const f = this.ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7000;
+        const g = this.ctx.createGain(); g.gain.value = 0.10 + this.intensity * 0.06;
+        src.connect(f); f.connect(g); g.connect(this.musicGain); src.start(t);
+      }
+      // bass
+      if (s % 2 === 0) {
+        const pat = [0, 0, 12, 0, 7, 0, 12, 10][Math.floor(s / 2) % 8];
+        send(0, 'sawtooth', midi(33 + root + pat), t, spb * 1.6, 0.16 + this.intensity * 0.07);
+      }
+      // arpeggio (appears as pace builds)
+      if (this.intensity > 0.12) {
+        const arp = [12, 19, 24, 31, 28, 19][s % 6];
+        send(0, 'square', midi(57 + root + arp), t, spb * 0.9, 0.045 * this.intensity, this.delay);
+        send(0, 'square', midi(57 + root + arp), t, spb * 0.9, 0.05 * this.intensity);
+      }
+      // pad stab
+      if (s === 0 || s === 14) {
+        [0, 7, 15].forEach(iv => send(0, 'triangle', midi(50 + root + iv), t, 0.5, 0.05 + this.intensity * 0.03, this.delay));
+      }
+      this.nextTime += spb; this.step++;
+    }
+  }
+};
+
+/* =============================== INPUT ============================== */
+const keys = {};
+const Input = {
+  left: 0, right: 0, jump: false, slide: false, dash: false,
+  touchSteer: 0,
+  init() {
+    addEventListener('keydown', e => {
+      const k = e.key.toLowerCase();
+      if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
+      if (keys[k]) return;
+      keys[k] = true;
+      if (k === ' ' || k === 'arrowup' || k === 'w') Input.jump = true;
+      if (k === 's' || k === 'arrowdown') Input.slide = true;
+      // edge-triggered: the game loop consumes it, keyup must not clear it
+      if (k === 'shift' && Game.state === 'play') Input.dash = true;
+      if (k === 'p' || k === 'escape') Game.togglePause();
+      if (k === 'm') { Audio_.setMuted(!Audio_.muted); UI.toast(Audio_.muted ? 'MUTED' : 'AUDIO ON', '#7fd8ff'); }
+      if (k === 'enter') { if (Game.state === 'menu' || Game.state === 'over') Game.start(); }
+    });
+    addEventListener('keyup', e => {
+      const k = e.key.toLowerCase();
+      keys[k] = false;
+      if (k === 's' || k === 'arrowdown') Input.slide = false;
+    });
+    addEventListener('blur', () => {
+      for (const k in keys) keys[k] = false;
+      Input.slide = false; Input.dash = false; Input.jump = false;
+      if (Game.state === 'play') Game.togglePause();
+    });
+
+    // touch / pointer: drag to steer, tap top half = jump, bottom = slide
+    let sx = 0, sy = 0, st = 0, moved = false;
+    canvas.addEventListener('pointerdown', e => {
+      if (Game.state !== 'play') return;
+      sx = e.clientX; sy = e.clientY; st = performance.now(); moved = false;
+      Input.touchSteer = 0;
+    });
+    canvas.addEventListener('pointermove', e => {
+      if (Game.state !== 'play' || !(keys['pointerdown'] || e.buttons || true)) return;
+      if (e.buttons === 0 && st === 0) return;
+      const dx = e.clientX - sx;
+      if (Math.abs(dx) > 12) moved = true;
+      Input.touchSteer = clamp(dx / 90, -1, 1);
+    });
+    addEventListener('pointerup', e => {
+      if (Game.state !== 'play') { Input.touchSteer = 0; return; }
+      const dt = performance.now() - st;
+      if (!moved && dt < 260) { if (e.clientY < innerHeight * 0.55) Input.jump = true; else Input.slide = true; }
+      Input.touchSteer = 0; st = 0;
+    });
+  },
+  steerAxis() {
+    let a = 0;
+    if (keys['a'] || keys['arrowleft']) a -= 1;
+    if (keys['d'] || keys['arrowright']) a += 1;
+    return clamp(a + Input.touchSteer, -1, 1);
+  }
+};
+
+/* ================================ UI ================================ */
+const $ = id => document.getElementById(id);
+const UI = {
+  hud: $('hud'), menu: $('menu'), pause: $('pause'), over: $('over'),
+  score: $('score'), best: $('bestVal'), dist: $('dist'), speed: $('speedNum'),
+  speedFill: $('speedFill'), combo: $('combo'), shieldPip: $('shieldPip'), dashPip: $('dashPip'),
+  toasts: $('toasts'), flashEl: $('flash'),
+  overCountdown: $('overCountdown'), overCount: $('overCount'),
+  show(el, v) { el.classList.toggle('hidden', !v); },
+  _lastToast: 0,
+  toast(text, color) {
+    // throttle so a burst of pickups can't bury the screen in text
+    const now = performance.now();
+    if (now - UI._lastToast < 700) return;
+    UI._lastToast = now;
+    while (UI.toasts.childElementCount > 1) UI.toasts.removeChild(UI.toasts.firstChild);
+    const d = document.createElement('div');
+    d.className = 'toast'; d.textContent = text; d.style.color = color || '#37f2ff';
+    UI.toasts.appendChild(d);
+    setTimeout(() => d.remove(), 1100);
+  },
+  flash(color, amount) {
+    const el = UI.flashEl;
+    el.style.background = color;
+    el.style.transition = 'none';
+    el.style.opacity = amount;
+    requestAnimationFrame(() => {
+      el.style.transition = 'opacity .42s ease-out';
+      el.style.opacity = 0;
+    });
+  }
+};
+
+/* ============================== GAME STATE =========================== */
+const LANE_W = 2.55;
+const ROAD_HALF = 4.0;
+const GRAVITY = -52;
+// Seconds the game-over screen stays up before drifting back to the title.
+const OVER_RETURN = 10;
+
+const Game = {
+  state: 'menu',            // menu | play | pause | over
+  t: 0, dt: 0, frame: 0,
+  dist: 0, score: 0, cores: 0, combo: 1, comboTimer: 0,
+  speed: 17, speedBase: 17, topSpeed: 0,
+  best: +(localStorage.getItem('neondrift.best') || 0),
+  bestCores: 0,
+  shake: 0, shakeX: 0, shakeY: 0,
+  camX: 0, camY: 4.2, camZ: 9.2, camYaw: 0, camRoll: 0, camFov: 1.02,
+  boostTimer: 0, invuln: 0, shield: false, shieldFlash: 0, pickupPulse: 0,
+  dashTimer: 0, dashCd: 0,
+  overCount: 0,
+  nextMilestone: 250,
+  slowmo: 1, hitStop: 0,
+  seed: Math.random() * 1000,
+  reset() {
+    this.dist = 0; this.score = 0; this.cores = 0; this.combo = 1; this.comboTimer = 0;
+    this.speed = this.speedBase; this.topSpeed = 0;
+    this.boostTimer = 0; this.invuln = 1.2; this.shield = false; this.shieldFlash = 0; this.pickupPulse = 0;
+    this.dashTimer = 0; this.dashCd = 0;
+    this.nextMilestone = 250; this.shake = 0; this.slowmo = 1; this.hitStop = 0;
+    Player.reset(); Particles.clear(); World.reset();
+    this.streakNear = 0;
+  },
+  start() {
+    Audio_.init(); Audio_.resume(); Audio_.startMusic();
+    this.reset();
+    this.state = 'play';
+    this.overCount = 0;
+    UI.overCountdown.classList.remove('on');
+    UI.show(UI.menu, false); UI.show(UI.over, false); UI.show(UI.hud, true);
+  },
+  gameOver() {
+    if (this.state !== 'play') return;
+    this.state = 'over';
+    Audio_.stopMusic(); Audio_.crash();
+    const isRecord = Math.floor(this.score) > this.best;
+    if (isRecord) { this.best = Math.floor(this.score); localStorage.setItem('neondrift.best', this.best); }
+    $('overScore').textContent = Math.floor(this.score).toLocaleString();
+    $('overDist').textContent = Math.floor(this.dist);
+    $('overDist2').textContent = Math.floor(this.dist);
+    $('overCores').textContent = this.cores;
+    $('overSpeed').textContent = Math.round(this.topSpeed * 7.2);
+    $('overBest').textContent = this.best.toLocaleString();
+    $('newRecWrap').style.display = isRecord ? 'block' : 'none';
+    UI.show(UI.hud, false); UI.show(UI.over, true);
+    // idle long enough and the title screen comes back on its own
+    this.overCount = OVER_RETURN;
+    UI.overCount.textContent = Math.ceil(this.overCount);
+    UI.overCountdown.classList.add('on');
+  },
+  togglePause() {
+    if (this.state === 'play') { this.state = 'pause'; UI.show(UI.pause, true); Audio_.stopMusic(); }
+    else if (this.state === 'pause') { this.state = 'play'; UI.show(UI.pause, false); Audio_.resume(); Audio_.startMusic(); }
+  },
+  // Back to the title screen and its idle fly-through. Re-seeds the world so
+  // the city behind the menu is fresh rather than littered with the run's
+  // leftover obstacles.
+  toMenu() {
+    if (this.state === 'menu') return;
+    this.state = 'menu';
+    this.overCount = 0;
+    UI.overCountdown.classList.remove('on');
+    World.reset();
+    Particles.clear();
+    UI.show(UI.over, false); UI.show(UI.pause, false); UI.show(UI.hud, false);
+    UI.show(UI.menu, true);
+    $('menuBest').textContent = this.best.toLocaleString();
+  },
+  addScore(n) { this.score += n * this.combo; },
+  bumpCombo() {
+    this.comboTimer = 3.4;
+    this.combo = Math.min(8, this.combo + 1);
+    if (this.combo === 4 || this.combo === 8) UI.toast('COMBO x' + this.combo, '#ffc23d');
+  }
+};
+/* ============================== PARTICLES ============================ */
+const Particles = {
+  list: [],
+  clear() { this.list.length = 0; },
+  spawn(o) {
+    if (this.list.length > 900) return;
+    o.life = o.life || 0.6; o.max = o.life;
+    o.vx = o.vx || 0; o.vy = o.vy || 0; o.vz = o.vz || 0;
+    o.size = o.size || 0.14; o.g = o.g == null ? -12 : o.g;
+    o.drag = o.drag == null ? 0.94 : o.drag;
+    o.spin = o.spin || 0; o.rot = o.rot || 0;
+    o.shape = o.shape || 'box';
+    this.list.push(o);
+  },
+  burst(x, y, z, n, color, power, opts) {
+    opts = opts || {};
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * TAU, e = Math.random() * PI - PI / 2;
+      const sp = power * (0.35 + Math.random() * 0.9);
+      this.spawn({
+        x, y, z,
+        vx: Math.cos(a) * Math.cos(e) * sp, vy: Math.sin(e) * sp * 0.9 + (opts.up || 1.5),
+        vz: Math.sin(a) * Math.cos(e) * sp,
+        r: color[0], g: color[1], b: color[2],
+        life: (opts.life || 0.55) * (0.6 + Math.random() * 0.8),
+        size: (opts.size || 0.15) * (0.5 + Math.random()),
+        spin: rand(-14, 14), shape: opts.shape || 'box',
+        g: opts.g == null ? -14 : opts.g
+      });
+    }
+  },
+  update(dt) {
+    const L = this.list;
+    for (let i = L.length - 1; i >= 0; i--) {
+      const p = L[i];
+      p.life -= dt;
+      if (p.life <= 0) { L.splice(i, 1); continue; }
+      p.vy += p.g * dt;
+      const d = Math.pow(p.drag, dt * 60);
+      p.vx *= d; p.vz *= d;
+      p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+      p.rot += p.spin * dt;
+      if (p.y < 0.02 && p.g < 0) { p.y = 0.02; p.vy = Math.abs(p.vy) * 0.32; p.vx *= 0.7; p.vz *= 0.7; }
+    }
+  },
+  render(bOpaque, bGlow) {
+    for (const p of this.list) {
+      const t = p.life / p.max;
+      const s = p.size * (p.shape === 'ring' ? (1.6 - t) : t * 1.15);
+      const a = clamp(t * 1.4, 0, 1);
+      const mesh = p.shape === 'ring' ? MESH.torus : (p.shape === 'ball' ? MESH.ball : MESH.box);
+      const b = p.shape === 'ring' ? glow : (t > 0.55 ? glow : opaque);
+      b.push(mesh, p.x, p.y, p.z, p.rot * 0.7, p.rot, p.rot * 0.4,
+        s * (p.shape === 'ring' ? 2.6 : 1), s, s * (p.shape === 'ring' ? 2.6 : 1),
+        p.r, p.g, p.b, p.shape === 'ring' ? 0.9 : 0.85, a, 0, 0);
+    }
+  }
+};
+
+/* =============================== PLAYER ============================== */
+const Player = {
+  x: 0, targetX: 0, vx: 0,
+  y: 0, vy: 0, grounded: true,
+  sliding: false, slideT: 0,
+  lean: 0, bob: 0, roll: 0,
+  airJumps: 1, coyote: 0, jumpBuffer: 0,
+  trail: [],
+  reset() {
+    this.x = 0; this.targetX = 0; this.vx = 0; this.y = 0; this.vy = 0;
+    this.grounded = true; this.sliding = false; this.slideT = 0;
+    this.lean = 0; this.roll = 0; this.airJumps = 1; this.coyote = 0;
+    this.trail.length = 0;
+  },
+  update(dt) {
+    const G = Game;
+    const steer = Input.steerAxis();
+
+    // --- lateral: velocity-scrubbed steering with snappy target follow ---
+    const maxLat = 11.4 + G.speed * 0.10;
+    const accel = this.grounded ? 96 : 62;
+    this.vx += steer * accel * dt;
+    this.vx *= Math.pow(this.grounded ? 0.00035 : 0.010, dt);   // strong damping = crisp stop
+    this.vx = clamp(this.vx, -maxLat, maxLat);
+    this.x += this.vx * dt;
+    const limit = ROAD_HALF - 0.55;
+    if (this.x < -limit) { this.x = -limit; this.vx = Math.max(0, this.vx * -0.25); }
+    if (this.x > limit) { this.x = limit; this.vx = Math.min(0, this.vx * -0.25); }
+
+    // --- dash: a short phase-burst that punches through a gap ---
+    if (Input.dash) {
+      Input.dash = false;
+      if (G.dashCd <= 0) {
+        G.dashTimer = 0.34; G.dashCd = 1.45;
+        G.invuln = Math.max(G.invuln, 0.40);
+        this.vx += steer * 9.5;
+        G.shake = Math.max(G.shake, 0.18);
+        Audio_.boost();
+        UI.flash('#37f2ff', 0.12);
+        Particles.burst(this.x, 0.7, 0.4, 22, [0.35, 0.95, 1.0], 6.5, { up: 0.4, life: 0.45, size: 0.12 });
+        Particles.spawn({ x: this.x, y: 0.7, z: 0, shape: 'ring', r: 0.4, g: 1, b: 1, life: 0.32, size: 0.8, g: 0, drag: 1 });
+        G.addScore(15);
+      }
+    }
+    if (G.dashTimer > 0) G.dashTimer = Math.max(0, G.dashTimer - dt);
+
+    // --- jump / slide state machine ---
+    if (Input.jump) {
+      Input.jump = false;
+      this.jumpBuffer = 0.13;
+    }
+    this.jumpBuffer -= dt;
+    this.coyote -= dt;
+
+    if (this.jumpBuffer > 0 && (this.coyote > 0 || this.airJumps > 0)) {
+      if (this.coyote <= 0) this.airJumps--;
+      this.vy = 17.4;
+      this.grounded = false; this.sliding = false; this.slideT = 0;
+      this.jumpBuffer = 0; this.coyote = 0;
+      Audio_.jump();
+      Particles.burst(this.x, 0.08, 0, 14, [0.35, 0.95, 1.0], 4.2, { up: 1.2, life: 0.4, size: 0.11 });
+      Particles.spawn({ x: this.x, y: 0.06, z: 0, shape: 'ring', r: 0.4, g: 1, b: 1, life: 0.34, size: 0.5, g: 0, drag: 1 });
+    }
+
+    const wantSlide = Input.slide && (this.grounded || this.y < 0.6);
+    if (wantSlide && !this.sliding && this.grounded) {
+      this.sliding = true; this.slideT = 0;
+      Audio_.slide();
+      Particles.burst(this.x, 0.1, 0.2, 16, [1.0, 0.75, 0.25], 5.5, { up: 0.6, life: 0.5, size: 0.1 });
+    }
+    if (this.sliding) {
+      this.slideT += dt;
+      const maxSlide = 0.62;
+      if (!Input.slide || this.slideT > maxSlide) {
+        if (this.slideT > 0.16) { this.sliding = false; this.slideT = 0; }
+      }
+    }
+
+    // --- vertical ---
+    const g = (!this.grounded && Input.slide === false && this.vy < 0) ? GRAVITY * 1.0 : (this.vy < 0 ? GRAVITY * 1.75 : GRAVITY);
+    this.vy += g * dt;
+    this.y += this.vy * dt;
+    if (this.y <= 0) {
+      if (!this.grounded) {
+        Audio_.land();
+        Game.shake = Math.max(Game.shake, Math.min(0.22, -this.vy * 0.008));
+        Particles.burst(this.x, 0.05, 0, 12, [0.5, 0.9, 1.0], 3.6, { up: 0.8, life: 0.36, size: 0.1 });
+        Particles.spawn({ x: this.x, y: 0.04, z: 0, shape: 'ring', r: 0.6, g: 1, b: 1, life: 0.3, size: 0.42, g: 0, drag: 1 });
+      }
+      this.y = 0; this.vy = 0; this.grounded = true; this.airJumps = 1; this.coyote = 0.12;
+    } else if (this.y > 0.06) this.grounded = false;
+
+    // --- cosmetic ---
+    this.lean = lerp(this.lean, clamp(this.vx / maxLat, -1, 1), 1 - Math.pow(0.001, dt));
+    this.roll = lerp(this.roll, -this.lean * 0.42, 1 - Math.pow(0.0006, dt));
+    this.bob += dt * (this.grounded ? G.speed * 1.5 : 6);
+
+    // speed trail
+    if (G.frame % 1 === 0) {
+      this.trail.push({ x: this.x, y: this.y + (this.sliding ? 0.25 : 0.75), life: 1 });
+      if (this.trail.length > 16) this.trail.shift();
+    }
+    for (const t of this.trail) t.life -= dt * 3.4;
+  },
+
+  /** draw the runner: a hovering courier drone-rider */
+  render(b, bg) {
+    const G = Game;
+    const px = this.x, py = this.y, roll = this.roll;
+    const slide = this.sliding ? Math.min(1, this.slideT / 0.12) : 0;
+    const bodyY = py + (this.sliding ? 0.34 : 0.86) + Math.sin(this.bob) * 0.045;
+    const boost = (G.boostTimer > 0 ? 1 : 0) + (G.dashTimer > 0 ? 0.8 : 0);
+    const tint = boost ? [1.0, 0.72, 0.22] : (G.shield ? [0.72, 0.62, 1.0] : [1, 1, 1]);
+    const E = 0.9;
+
+    // hover board -----------------------------------------------------
+    const boardY = py + 0.16 + Math.sin(this.bob * 1.3) * 0.02;
+    b.push(MESH.box, px, boardY, 0, 0.06 - this.lean * 0.05, roll * 0.5, -this.lean * 0.16,
+      1.32, 0.13, 3.05, 0.16 * tint[0], 0.19 * tint[1], 0.30 * tint[2], 0.05, 1, 0, 0.9);
+    b.push(MESH.box, px, boardY + 0.075, 0, 0, roll * 0.5, -this.lean * 0.16,
+      1.05, 0.05, 2.6, 0.22 * tint[0], 0.95 * tint[1], 1.0 * tint[2], E, 1, 0, 0);
+    // board nose fins
+    for (const sgn of [-1, 1]) {
+      b.push(MESH.box, px + sgn * 0.62, boardY + 0.1, -1.5, 0, roll * 0.5, sgn * 0.3,
+        0.14, 0.3, 0.7, 0.2, 0.24, 0.36, 0.1, 1, 0, 0);
+    }
+    // underglow
+    bg.push(MESH.box, px, boardY - 0.16, -0.1, 0, roll * 0.5, 0,
+      1.15, 0.05, 2.7, 0.35 * tint[0], 0.95 * tint[1], 1.0, 1, 0.55 + boost * 0.3, 0, 0);
+    // thruster jets
+    const jet = 0.55 + Math.sin(G.t * 40) * 0.12 + boost * 1.5;
+    for (const sgn of [-1, 1]) {
+      bg.push(MESH.cone, px + sgn * 0.42, boardY + 0.02, 1.4 + jet * 0.5, PI / 2, roll * 0.5, 0,
+        0.34, jet, 0.34, 1.0, 0.55 * (1 - boost * 0.4), 0.25, 1, 0.75, 0, 0);
+    }
+
+    // body ------------------------------------------------------------
+    const bx = px, by = bodyY;
+    b.push(MESH.box, bx, by, 0, -0.10, roll, -this.lean * 0.1,
+      0.78, 1.02 - slide * 0.42, 0.62, 0.30 * tint[0], 0.34 * tint[1], 0.48 * tint[2], 0.06, 1, 0, 0.7);
+    // chest light
+    b.push(MESH.box, bx, by + 0.1, -0.34, -0.1, roll, -this.lean * 0.1,
+      0.30, 0.16, 0.06, 0.3 * tint[0], 1.0 * tint[1], 0.85 * tint[2], 1, 1, 0, 0);
+    // shoulder pads
+    for (const sgn of [-1, 1]) {
+      b.push(MESH.box, bx + sgn * 0.5, by + 0.34 - slide * 0.18, 0, 0, roll, sgn * 0.25 - this.lean * 0.1,
+        0.3, 0.26, 0.5, 0.5, 0.12, 0.32, 0.12, 1, 0, 0.6);
+      bg.push(MESH.box, bx + sgn * 0.5, by + 0.48 - slide * 0.18, 0, 0, roll, sgn * 0.25,
+        0.2, 0.05, 0.4, 1.0, 0.2, 0.6, 1, 0.9, 0, 0);
+    }
+    // head + visor
+    const hy = by + 0.78 - slide * 0.34;
+    b.push(MESH.box, bx, hy, -0.02, -0.06, roll, -this.lean * 0.1,
+      0.46, 0.42, 0.44, 0.20, 0.22, 0.32, 0.08, 1, 0, 0.8);
+    bg.push(MESH.box, bx, hy + 0.02, -0.24, 0, roll, -this.lean * 0.1,
+      0.40, 0.15, 0.05, 0.35, 1.0, 1.0, 1, 1, 0, 0);
+    // antenna
+    b.push(MESH.cyl, bx + 0.16, hy + 0.34, 0.05, 0.18, roll, 0.16, 0.04, 0.42, 0.04, 0.4, 0.4, 0.5, 0.1, 1, 0, 0);
+    bg.push(MESH.ball, bx + 0.2, hy + 0.56, 0.06, 0, G.t * 3, 0, 0.14, 0.14, 0.14,
+      1.0, 0.25, 0.5, 1, 0.9 + Math.sin(G.t * 8) * 0.1, 0, 0);
+
+    // arms (swing with lean)
+    const swing = Math.sin(this.bob * 0.5) * 0.12 - this.lean * 0.35;
+    for (const sgn of [-1, 1]) {
+      b.push(MESH.box, bx + sgn * 0.62, by + 0.02 - slide * 0.1, 0.12 + sgn * swing,
+        sgn * swing * 0.6, roll, -this.lean * 0.1,
+        0.2, 0.66, 0.22, 0.24, 0.27, 0.4, 0.05, 1, 0, 0.5);
+    }
+    // legs / boots tucked on the board
+    if (!this.sliding) {
+      for (const sgn of [-1, 1]) {
+        b.push(MESH.box, bx + sgn * 0.24, by - 0.62, 0.06, 0.12, roll, -this.lean * 0.08,
+          0.24, 0.5, 0.3, 0.16, 0.18, 0.28, 0.05, 1, 0, 0.5);
+        b.push(MESH.box, bx + sgn * 0.26, by - 0.92, -0.06, 0, roll, -this.lean * 0.08,
+          0.3, 0.18, 0.56, 0.42, 0.1, 0.28, 0.15, 1, 0, 0.6);
+      }
+    }
+
+    // shield bubble — thin shell + orbiting rings, kept faint so it never hides the rider
+    if (G.shield) {
+      const pulse = 0.5 + 0.5 * Math.sin(G.t * 5);
+      bg.push(MESH.sphere, bx, by + 0.1, 0, 0, G.t * 0.8, 0,
+        2.0, 2.3, 2.0, 0.45, 0.38, 1.0, 0.5, 0.055 + pulse * 0.025 + G.shieldFlash * 0.4, 0, 0);
+      for (let k = 0; k < 2; k++) {
+        bg.push(MESH.torus, bx, by + 0.1, 0, PI / 2 + Math.sin(G.t * 1.4 + k * 2.1) * 0.5, G.t * (1.6 + k * 0.7), k * 0.6,
+          1.95 - k * 0.25, 1.95 - k * 0.25, 1.95 - k * 0.25, 0.62, 0.52, 1.0, 1, 0.34, 0, 0);
+      }
+    }
+
+    // motion trail ribbons
+    for (let i = 0; i < this.trail.length; i++) {
+      const t = this.trail[i];
+      if (t.life <= 0) continue;
+      const a = t.life * 0.30 * (boost ? 2 : 1);
+      const s = 0.10 + t.life * 0.22;
+      bg.push(MESH.box, t.x, t.y, 0.6 + (this.trail.length - i) * 0.34, 0, 0, 0,
+        s, s * 0.6, 0.3, tint[0] * 0.4, 0.95, 1.0, 1, a, 0, 0);
+    }
+  }
+};
+/* ================================ WORLD ==============================
+   Endless procedural skyway: obstacle patterns, pickups, and a dense
+   neon city that scrolls past. Objects live in a flat list and are
+   recycled once they pass behind the camera.                          */
+
+const NEON = {
+  cyan: [0.22, 0.95, 1.0],
+  mag: [1.0, 0.18, 0.60],
+  amber: [1.0, 0.76, 0.20],
+  violet: [0.62, 0.40, 1.0],
+  lime: [0.55, 1.0, 0.45],
+  white: [0.92, 0.97, 1.0]
+};
+const NEON_KEYS = ['cyan', 'mag', 'amber', 'violet', 'lime'];
+
+const World = {
+  objs: [],        // gameplay objects (obstacles + pickups)
+  props: [],       // pure scenery
+  far: [],         // distant skyline (recycled on a fixed track)
+  spawnZ: -60,     // next generation cursor (negative = ahead)
+  hazardZ: -60,    // cursor for obstacle patterns (runs wider than scenery)
+  scroll: 0,       // total travelled distance
+  difficulty: 0,
+  HAZARD_SPACING: 1.5,   // gap multiplier between obstacle patterns
+  INTRA_SPACING: 1.5,    // gap multiplier between obstacles inside a pattern
+  reset() {
+    this.objs.length = 0; this.props.length = 0;
+    this.spawnZ = -70; this.scroll = 0; this.difficulty = 0;
+    this.hazardZ = -110;   // gentle intro: no obstacles for the first stretch
+    this.buildFar();
+    // gentle intro: no obstacles for the first stretch
+    for (let z = -66; z < 8; z += 13) this.sceneryChunk(z);
+    while (this.spawnZ > -260) this.generateChunk();
+  },
+
+  /* ---------- distant skyline (parallax, wraps on a long loop) ---------- */
+  buildFar() {
+    this.far.length = 0;
+    for (let i = 0; i < 130; i++) {
+      const side = i % 2 ? 1 : -1;
+      const x = side * rand(26, 130);
+      const h = rand(18, 110) * (1 - Math.abs(x) / 260);
+      this.far.push({
+        x, z: rand(-420, 60), w: rand(7, 20), d: rand(7, 20), h: Math.max(10, h),
+        c: Math.random() < 0.5 ? [0.10, 0.11, 0.20] : [0.14, 0.08, 0.20],
+        top: Math.random() < 0.35 ? NEON[pick(NEON_KEYS)] : null,
+        loop: 480
+      });
+    }
+  },
+
+  /* ------------------------- generation ------------------------- */
+  laneX(i) { return (i - 1) * LANE_W; },
+
+  add(o) { o.alive = true; o.t = rand(0, 10); this.objs.push(o); return o; },
+
+  generateChunk() {
+    const z = this.spawnZ;
+    this.sceneryChunk(z);
+    this.spawnZ -= this.chunkLen;
+
+    // Hazard patterns run on their own cursor, HAZARD_SPACING x wider than the
+    // scenery chunks. Decoupling them keeps the city dense while the track
+    // gets room to read.
+    while (this.hazardZ > this.spawnZ) {
+      this.hazardPattern(this.hazardZ);
+      this.hazardZ -= this.chunkLen * this.HAZARD_SPACING;
+    }
+  },
+
+  hazardPattern(z) {
+    const d = this.difficulty;
+    const roll = Math.random();
+    if (roll < 0.16 + d * 0.06) this.patternCores(z);
+    else if (roll < 0.30 + d * 0.05) this.patternBoost(z);
+    else if (roll < 0.42) this.patternShield(z);
+    else this.patternObstacles(z);
+  },
+
+  get chunkLen() { return 20 - Math.min(6, this.difficulty * 3); },
+
+  /* --- obstacle patterns: each leaves at least one safe route --- */
+  patternObstacles(z) {
+    const d = this.difficulty;
+    const kinds = ['block', 'wall', 'beam', 'saw', 'drone', 'laser', 'twin'];
+    const n = 1 + (Math.random() < d * 0.75 ? 1 : 0) + (Math.random() < d * 0.35 ? 1 : 0);
+    let lastZ = z;
+    for (let i = 0; i < n; i++) {
+      const kind = pick(kinds);
+      const zz = z - i * rand(7.5, 12) * this.INTRA_SPACING;
+      if (Math.abs(zz - lastZ) < 6 * this.INTRA_SPACING && i > 0) continue;
+      lastZ = zz;
+      this.placeObstacle(kind, zz, d);
+    }
+    // reward line threading a clear lane
+    if (Math.random() < 0.75) {
+      const lane = randInt(0, 2);
+      for (let k = 0; k < 5; k++) {
+        const cz = z - 4 - k * 2.2;
+        if (!this.blockedAt(this.laneX(lane), cz, 1.7)) this.add({ type: 'core', x: this.laneX(lane), y: 0.95, z: cz, r: 0.42 });
+      }
+    }
+  },
+  placeObstacle(kind, z, d) {
+    const lane = randInt(0, 2);
+    const x = this.laneX(lane);
+    switch (kind) {
+      case 'block':
+        this.add({ type: 'block', x, y: 0, z, w: 2.1, h: 1.05, dp: 0.9, need: 'jump' });
+        break;
+      case 'wall': {
+        const wide = Math.random() < 0.25 + d * 0.3;
+        const wx = wide ? this.laneX(lane === 0 ? 0 : 1) : x;
+        this.add({ type: 'wall', x: wx, y: 0, z, w: wide ? LANE_W * 2 : 2.15, h: 3.4, dp: 0.7, need: 'dodge' });
+        break;
+      }
+      case 'beam':
+        this.add({ type: 'beam', x: 0, y: 1.55, z, w: ROAD_HALF * 2, h: 1.5, dp: 0.7, need: 'slide' });
+        break;
+      case 'saw':
+        this.add({ type: 'saw', x, y: 0.75, z, w: 1.5, h: 1.5, dp: 1.5, need: 'jump', spin: 0 });
+        break;
+      case 'drone':
+        this.add({ type: 'drone', x, y: 0.2, z, w: 1.35, h: 2.4, dp: 1.3, need: 'dodge', bob: rand(0, 6), lane });
+        break;
+      case 'laser':
+        this.add({ type: 'laser', x, y: 0, z, w: 1.9, h: 2.6, dp: 0.5, need: 'dodge', phase: rand(0, 6), on: true });
+        break;
+      case 'twin': {
+        const open = randInt(0, 2);
+        for (let i = 0; i < 3; i++) if (i !== open) this.add({ type: 'block', x: this.laneX(i), y: 0, z, w: 2.2, h: 1.15, dp: 0.9, need: 'jump' });
+        // guide the player to the gap
+        for (let k = 0; k < 3; k++) this.add({ type: 'core', x: this.laneX(open), y: 0.95, z: z + 5 + k * 2.4, r: 0.42 });
+        break;
+      }
+    }
+  },
+  blockedAt(x, z, pad) {
+    for (const o of this.objs) {
+      if (o.type === 'core' || o.type === 'shield' || o.type === 'boost') continue;
+      if (Math.abs(o.z - z) < (o.dp || 1) + pad && Math.abs(o.x - x) < (o.w || 1) * 0.6 + pad) return true;
+    }
+    return false;
+  },
+
+  patternCores(z) {
+    const lane = randInt(0, 2);
+    const arc = Math.random() < 0.45;
+    const count = 7 + randInt(0, 5);
+    for (let k = 0; k < count; k++) {
+      const cz = z - k * 2.5;
+      const y = arc ? 0.9 + Math.sin(k / (count - 1) * PI) * 2.6 : 0.95;
+      this.add({ type: 'core', x: this.laneX(lane), y, z: cz, r: 0.42 });
+    }
+    if (Math.random() < 0.4) {
+      const l2 = (lane + 1 + randInt(0, 1)) % 3;
+      for (let k = 0; k < 4; k++) this.add({ type: 'core', x: this.laneX(l2), y: 0.95, z: z - 4 - k * 2.5, r: 0.42 });
+    }
+  },
+  patternBoost(z) {
+    const lane = randInt(0, 2);
+    for (let k = 0; k < 3; k++) this.add({ type: 'boost', x: this.laneX(lane), y: 0.02, z: z - k * 4.2, w: 2.2, h: 0.4, dp: 3.4 });
+    for (let k = 0; k < 5; k++) this.add({ type: 'core', x: this.laneX(lane), y: 0.95, z: z + 6 - k * 3, r: 0.42 });
+  },
+  patternShield(z) {
+    const lane = randInt(0, 2);
+    this.add({ type: 'shield', x: this.laneX(lane), y: 1.5, z, r: 0.75 });
+    for (let k = 0; k < 4; k++) this.add({ type: 'core', x: this.laneX(lane), y: 0.95, z: z - 8 - k * 2.6, r: 0.42 });
+  },
+
+  /* Distance from the centre line to the track-side wall of the nearest tower
+     on `side` whose z-span covers zz. Returns a large value when the way is
+     clear, so callers can treat it as an unbounded outer limit. */
+  buildingFace(side, zz, depth) {
+    let face = 1e9;
+    for (const p of this.props) {
+      if (p.m !== 'bld') continue;
+      if (side > 0 ? p.x <= 0 : p.x >= 0) continue;
+      if (Math.abs(p.z - zz) > (p.sz || 0) * 0.5 + depth) continue;
+      const f = Math.abs(p.x) - (p.sx || 0) * 0.5;
+      if (f < face) face = f;
+    }
+    return face;
+  },
+
+  /* Re-fit the billboards on `side` after a tower wall has been placed at
+     distance `face` from the centre line, spanning bz +/- sz/2. Signs and
+     towers are generated independently, so a chunk arriving later can drop a
+     wall straight through a sign that was already fine. Slide the sign inboard
+     (inward moves can never break a wall it already cleared); if the wall has
+     eaten the whole gap, remove the sign. */
+  fitSigns(side, face, bz, sz) {
+    for (let i = this.props.length - 1; i >= 0; i--) {
+      const s = this.props[i];
+      if (s.m !== 'sign' || Math.sign(s.x) !== side) continue;
+      if (Math.abs(s.z - bz) > sz * 0.5 + 1.5) continue;
+      const half = s.sx * 0.55;
+      const inner = ROAD_HALF + 4.5 + half;   // min centre distance
+      const outer = face - 0.9 - half;        // max centre distance
+      if (Math.abs(s.x) <= outer) continue;
+      if (outer >= inner) s.x = side * (inner + (outer - inner) * Math.random());
+      else this.props.splice(i, 1);
+    }
+  },
+
+  /* ------------------------- scenery ------------------------- */
+  sceneryChunk(z) {
+    const p = this.props;
+    const neonKey = () => pick(NEON_KEYS);
+    // Underside of the skyway. Rule learned the hard way: never put geometry
+    // within ~40m under the deck. At this camera pitch it projects up onto the
+    // road in screen space and reads as a wall of ledges across the skyway.
+    // light masts with glowing caps
+    if (Math.random() < 0.85) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const zz = z - rand(0, 8);
+      const col = NEON[neonKey()];
+      p.push({ m: 'cyl', x: side * (ROAD_HALF + 1.5), y: 1.6, z: zz, sx: 0.16, sy: 3.2, sz: 0.16, c: [0.12, 0.13, 0.2], e: 0 });
+      p.push({ m: 'ball', x: side * (ROAD_HALF + 1.5), y: 3.4, z: zz, sx: 0.5, sy: 0.5, sz: 0.5, c: col, e: 1, glow: 1 });
+      p.push({ m: 'box', x: side * (ROAD_HALF + 1.5), y: 2.6, z: zz, sx: 0.9, sy: 0.06, sz: 0.9, c: col, e: 1, glow: 1 });
+    }
+    // buildings on both sides (kept clear of the flight corridor)
+    const nb = 2 + randInt(0, 2);
+    for (let i = 0; i < nb; i++) {
+      const side = (i % 2) ? 1 : -1;
+      const sx = rand(5, 11), sz = rand(5, 11);
+      const x = side * (ROAD_HALF + 6.5 + sx * 0.5 + rand(0, 24));
+      const h = rand(14, 52);
+      const bz = z - rand(0, 18);
+      p.push({
+        m: 'bld', x, y: h / 2 - 3, z: bz,
+        sx, sy: h, sz,
+        c: [0.055, 0.06, 0.11], e: 0, mode: 1
+      });
+      // A tower can be generated after the sign (chunks arrive from ahead), so
+      // re-fit any billboard this wall now cuts through. Guarantees no sign is
+      // ever buried, whichever order the two get generated in.
+      this.fitSigns(side, Math.abs(x) - sx * 0.5, bz, sz);
+      if (Math.random() < 0.4) {
+        const col = NEON[neonKey()];
+        p.push({ m: 'box', x, y: h - 3 + 0.6, z: z - rand(0, 18), sx: rand(2, 5), sy: 1.2, sz: rand(2, 5), c: col, e: 1, glow: 1 });
+      }
+    }
+    // neon billboards. Placement used to ignore where the towers landed, so a
+    // sign could end up buried in a building. Clamp the panel (and its 1.1x
+    // frame) to stay on the track side of the nearest wall.
+    if (Math.random() < 0.55) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const col = NEON[neonKey()];
+      const sx = rand(4, 8);
+      const zz = z - rand(2, 14);
+      const half = sx * 0.55;                  // frame is drawn at 1.1x the panel
+      const inner = ROAD_HALF + 4.5 + half;    // never overhang the corridor
+      // Walk along z looking for a stretch of wall wide enough for the panel,
+      // so a crowded block shifts the sign instead of losing it.
+      let placed = false;
+      // Search only toward the camera: towers beyond `z` have not been
+      // generated yet, so a slot out there could be claimed by a later chunk.
+      for (let k = 0; k < 6 && !placed; k++) {
+        const zt = zz + k * 9;
+        const outer = this.buildingFace(side, zt, 12) - 0.9 - half;
+        if (outer <= inner) continue;
+        const d = Math.max(Math.min(ROAD_HALF + 4.5 + sx * 0.5 + rand(0, 8), outer), inner);
+        p.push({
+          m: 'sign', x: side * d, y: rand(4, 14), z: zt,
+          sx, sy: rand(2.4, 5), sz: 1,
+          c: col, e: 1, glow: 1, face: -side, glyph: randInt(0, 5)
+        });
+        placed = true;
+      }
+    }
+    // overhead arches
+    if (Math.random() < 0.34) {
+      const col = NEON[neonKey()];
+      const zz = z - rand(2, 12);
+      p.push({ m: 'arch', x: 0, y: 0, z: zz, sx: 1, sy: 1, sz: 1, c: col, e: 0.85, glow: 1 });
+    }
+    // floating holo rings over the road (pure decoration, you fly through)
+    if (Math.random() < 0.22) {
+      const col = NEON[neonKey()];
+      const lane = randInt(0, 2);
+      p.push({ m: 'ring', x: this.laneX(lane), y: 1.9, z: z - rand(0, 14), sx: 3.4, sy: 3.4, sz: 3.4, c: col, e: 1, glow: 1, spin: rand(0.4, 1.2) });
+    }
+    // flying traffic
+    if (Math.random() < 0.4) {
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      p.push({
+        m: 'car', x: dir * rand(12, 42), y: rand(3, 22), z: z - rand(0, 18),
+        sx: 1.4, sy: 0.7, sz: 3.4, c: [0.10, 0.11, 0.18], e: 0,
+        glowC: NEON[neonKey()], spd: dir * rand(6, 22), alt: 0
+      });
+    }
+    // Ground haze strips. These must stay DEEP (well under the deck) and off to
+    // the sides: at this camera pitch anything within ~35m below the road
+    // projects up into the foreground and reads as a ledge across the skyway.
+    if (Math.random() < 0.5) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      p.push({ m: 'box', x: side * rand(22, 70), y: rand(-70, -48), z: z - rand(0, 18), sx: rand(10, 40), sy: 0.4, sz: 0.8, c: NEON[neonKey()], e: 1, glow: 1 });
+    }
+  },
+
+  /* --------------------------- update --------------------------- */
+  update(dt, speed) {
+    const dz = speed * dt;
+    this.scroll += dz;
+    this.difficulty = clamp(this.dist01(), 0, 1);
+    // the spawn cursors live in the same relative space as the objects, so they
+    // have to ride the scroll or generation stops after the first burst
+    this.spawnZ += dz;
+    this.hazardZ += dz;
+
+    for (const o of this.objs) {
+      o.z += dz; o.t += dt;
+      if (o.type === 'saw') o.spin += dt * 9;
+      if (o.type === 'drone') { o.y = 0.2 + Math.sin(o.t * 2.2 + o.bob) * 0.35; o.x += Math.sin(o.t * 1.1 + o.bob) * dt * 1.4; }
+      if (o.type === 'laser') o.on = (Math.sin(o.t * 3.0 + o.phase) > -0.25);
+    }
+    // cull
+    for (let i = this.objs.length - 1; i >= 0; i--) {
+      const o = this.objs[i];
+      if (o.z > 24) this.objs.splice(i, 1);
+    }
+    for (const p of this.props) {
+      p.z += dz;
+      if (p.m === 'car') {
+        // own traffic motion, relative to the player's forward speed
+        p.z += (-p.spd) * dt;
+        p.alt += dt;
+        p.y += Math.sin(p.alt * 0.7 + p.x) * dt * 0.35;
+      }
+      if (p.spin) p.rot = (p.rot || 0) + p.spin * dt;
+    }
+    for (let i = this.props.length - 1; i >= 0; i--) {
+      const p = this.props[i];
+      if (p.z > 46 || p.z < -420) this.props.splice(i, 1);
+    }
+
+    // The skyline scrolls at the TRUE world rate. It used to creep along at
+    // 0.16x as a fake parallax layer, but this scene is fully perspective-
+    // projected: distance already slows things down on its own. Doubling up
+    // made a far tower slide ~7x slower than a near one at the same distance,
+    // so the two layers visibly disagreed. Perspective does the parallax now.
+    for (const f of this.far) {
+      f.z += dz;
+      if (f.z > 90) { f.z -= f.loop; f.x = (Math.random() < 0.5 ? -1 : 1) * rand(26, 130); }
+    }
+
+    while (this.spawnZ > -this.lookAhead) this.generateChunk();
+  },
+  get lookAhead() { return 300; },
+  dist01() { return Game.dist / 2200; }
+};
+/* ============================ COLLISION ============================= */
+function playerBox() {
+  const p = Player;
+  const h = p.sliding ? 0.85 : 1.75;
+  return { x: p.x, y: p.y, z: 0, w: 0.82, h, d: 0.9 };
+}
+function checkCollisions() {
+  const G = Game, P = Player;
+  const pb = playerBox();
+  const pyLo = pb.y + 0.05, pyHi = pb.y + pb.h;
+
+  for (const o of World.objs) {
+    if (!o.alive) continue;
+    const dx = Math.abs(o.x - pb.x), dz = Math.abs(o.z - pb.z);
+
+    /* ---- pickups ---- */
+    if (o.type === 'core') {
+      const rr = o.r + 0.85;
+      if (dx < rr && dz < rr && Math.abs(o.y - (pb.y + pb.h * 0.5)) < 1.5) {
+        const cz = o.z;
+        o.alive = false; o.z = 999;
+        G.cores++; G.addScore(10);
+        G.bumpCombo();
+        Audio_.coin(G.combo);
+        Particles.burst(o.x, o.y, cz, 9, [1.0, 0.85, 0.3], 3.4, { life: 0.4, size: 0.1, g: -4 });
+        Particles.spawn({ x: o.x, y: o.y, z: 0, shape: 'ring', r: 1, g: 0.85, b: 0.3, life: 0.28, size: 0.34, g: 0, drag: 1 });
+        G.pickupPulse = 1;
+      }
+      continue;
+    }
+    if (o.type === 'shield' || o.type === 'boost') {
+      const rr = 1.5;
+      if (dx < rr && dz < rr && Math.abs(o.y - (pb.y + 0.9)) < 2.0) {
+        const cz = o.z;
+        o.alive = false; o.z = 999;
+        if (o.type === 'shield') {
+          G.shield = true; G.shieldFlash = 1; Audio_.shield();
+          UI.toast('SHIELD ONLINE', '#a98bff');
+          Particles.burst(P.x, 1.2, 0, 26, [0.65, 0.45, 1.0], 6, { life: 0.7, size: 0.13, g: -2 });
+        } else {
+          G.boostTimer = Math.max(G.boostTimer, 2.4); Audio_.boost();
+          UI.toast('OVERDRIVE', '#ffc23d');
+          UI.flash('#ffb020', 0.28);
+          Particles.burst(P.x, 0.6, 0, 24, [1.0, 0.7, 0.2], 6, { life: 0.6, size: 0.14, g: -3 });
+        }
+        Particles.spawn({ x: o.x, y: o.y, z: cz, shape: 'ring', r: 0.6, g: 0.9, b: 1, life: 0.45, size: 0.7, g: 0, drag: 1 });
+      }
+      continue;
+    }
+
+    /* ---- obstacles ---- */
+    if (o.type === 'laser' && !o.on) continue;
+
+    const hw = (o.w || 1) * 0.5, hd = (o.dp || 1) * 0.5;
+    if (dx > hw + pb.w * 0.5 - 0.12) continue;
+    if (dz > hd + pb.d * 0.5 - 0.12) continue;
+
+    let oLo = o.y, oHi = o.y + (o.h || 1);
+    if (o.type === 'saw') { oLo = o.y - 0.7; oHi = o.y + 0.7; }
+    if (pyHi < oLo + 0.1 || pyLo > oHi - 0.1) continue;
+
+    // grazing a beam while sliding, or skimming a block — reward close calls
+    hitObstacle(o);
+    return;
+  }
+}
+function nearMissCheck() {
+  const P = Player, G = Game;
+  for (const o of World.objs) {
+    if (!o.alive || o.nm) continue;
+    if (o.type === 'core' || o.type === 'shield' || o.type === 'boost') continue;
+    if (Math.abs(o.z) < 1.0) {
+      const dx = Math.abs(o.x - P.x);
+      const oLo = o.y, oHi = o.y + (o.h || 1);
+      const pb = playerBox();
+      const vertGap = Math.max(oLo - (pb.y + pb.h), pb.y - oHi);
+      if (dx < 2.6 || vertGap < 0.9) {
+        o.nm = true;
+        G.streakNear = (G.streakNear || 0) + 1;
+        G.addScore(25);
+        Audio_.near();
+        Particles.spawn({ x: o.x, y: oLo + (o.h || 1) * 0.5, z: 0, shape: 'ring', r: 1, g: 0.95, b: 0.4, life: 0.3, size: 0.5, g: 0, drag: 1 });
+        if (G.streakNear % 5 === 0) { UI.toast('NEAR MISS x' + G.streakNear, '#ffe066'); G.bumpCombo(); }
+      }
+    }
+  }
+}
+function hitObstacle(o) {
+  const G = Game, P = Player;
+  if (G.invuln > 0) return;
+
+  if (G.shield) {
+    G.shield = false; G.shieldFlash = 1; G.invuln = 1.0;
+    o.alive = false; o.z = 999;
+    Audio_.shield(); Audio_.noise(0.3, 0.3, 200, 4000);
+    UI.flash('#8b5bff', 0.42);
+    G.shake = 0.5; G.hitStop = 0.09;
+    Particles.burst(P.x, 1.1, 0, 40, [0.7, 0.5, 1.0], 9, { life: 0.8, size: 0.16 });
+    UI.toast('SHIELD BROKEN', '#a98bff');
+    G.combo = 1;
+    return;
+  }
+  if (G.boostTimer > 0.15) {
+    // overdrive smashes through
+    o.alive = false; o.z = 999;
+    Audio_.crash(); Audio_.boost();
+    G.shake = 0.42; G.hitStop = 0.07;
+    UI.flash('#ffb020', 0.35);
+    Particles.burst(P.x, 1.0, 0, 46, [1.0, 0.7, 0.2], 11, { life: 0.9, size: 0.18 });
+    G.addScore(50);
+    return;
+  }
+  // crash
+  o.alive = false;
+  G.shake = 0.9; G.hitStop = 0.16;
+  Particles.burst(P.x, 1.0, 0, 60, [1.0, 0.25, 0.45], 12, { life: 1.1, size: 0.2 });
+  Particles.burst(P.x, 1.0, 0, 26, [0.3, 0.9, 1.0], 9, { life: 0.9, size: 0.15 });
+  Particles.spawn({ x: P.x, y: 1.0, z: 0, shape: 'ring', r: 1, g: 0.3, b: 0.4, life: 0.5, size: 1.1, g: 0, drag: 1 });
+  UI.flash('#ff2e9a', 0.6);
+  G.gameOver();
+}
+
+/* ======================= OBJECT RENDERING =========================== */
+function renderObjects(b, bg) {
+  const G = Game, t = G.t;
+
+  for (const o of World.objs) {
+    if (!o.alive) continue;
+    if (o.z < -230 || o.z > 24) continue;
+    switch (o.type) {
+      case 'core': {
+        const s = 0.62 + Math.sin(t * 4 + o.x) * 0.05;
+        const y = o.y + Math.sin(t * 2.6 + o.z * 0.3) * 0.14;
+        // solid amber core so it stays readable, with a light additive ring
+        b.push(MESH.octa, o.x, y, o.z, 0, t * 2.4, 0, s * 1.05, s * 1.45, s * 1.05, 1.0, 0.72, 0.20, 0.85, 1, 0, 0.7);
+        bg.push(MESH.torus, o.x, y, o.z, PI / 2, t * 3.2, 0, 0.86, 0.86, 0.86, 1.0, 0.86, 0.42, 1, 0.30, 0, 0);
+        bg.push(MESH.ball, o.x, y, o.z, 0, 0, 0, 0.22, 0.22, 0.22, 1, 0.95, 0.7, 1, 0.35, 0, 0);
+        break;
+      }
+      case 'shield': {
+        const y = o.y + Math.sin(t * 2 + o.z * 0.2) * 0.18;
+        bg.push(MESH.sphere, o.x, y, o.z, t * 0.6, t * 0.9, 0, 1.15, 1.15, 1.15, 0.62, 0.45, 1.0, 0.9, 0.45, 0, 0);
+        bg.push(MESH.torus, o.x, y, o.z, 0, t * 2, t * 0.7, 1.45, 1.45, 1.45, 0.8, 0.7, 1.0, 1, 0.6, 0, 0);
+        break;
+      }
+      case 'boost': {
+        const f = 0.5 + 0.5 * Math.sin(t * 9 + o.z * 0.5);
+        b.push(MESH.box, o.x, 0.05, o.z, 0, 0, 0, o.w, 0.1, 3.2, 1.0, 0.62, 0.12, 0.55 + f * 0.45, 1, 0, 0);
+        for (let k = 0; k < 3; k++) {
+          const zz = o.z + ((t * 6 + k * 1.1) % 3.2) - 1.6;
+          bg.push(MESH.box, o.x, 0.14, zz, 0, 0, 0, o.w * 0.62, 0.05, 0.34, 1.0, 0.85, 0.3, 1, 0.85, 0, 0);
+        }
+        break;
+      }
+      case 'block': {
+        // jump hurdle: bright slab with a glowing top lip so the top edge reads
+        b.push(MESH.box, o.x, o.h * 0.5, o.z, 0, 0, 0, o.w, o.h, o.dp, 0.30, 0.30, 0.46, 0.10, 1, 0, 0.55);
+        bg.push(MESH.box, o.x, o.h - 0.05, o.z, 0, 0, 0, o.w * 1.02, 0.13, o.dp * 1.02, 0.25, 0.95, 1.0, 1, 1, 0, 0);
+        bg.push(MESH.box, o.x, o.h * 0.42, o.z - o.dp * 0.5 - 0.02, 0, 0, 0, o.w * 0.72, o.h * 0.2, 0.04, 1.0, 0.2, 0.55, 1, 0.9, 0, 0);
+        break;
+      }
+      case 'wall': {
+        // dodge wall: tall lit panel with neon verticals
+        b.push(MESH.box, o.x, o.h * 0.5, o.z, 0, 0, 0, o.w, o.h, o.dp, 0.26, 0.24, 0.44, 0.10, 1, 0, 0.4);
+        bg.push(MESH.box, o.x, o.h + 0.02, o.z, 0, 0, 0, o.w * 1.02, 0.14, o.dp * 1.1, 1.0, 0.18, 0.55, 1, 1, 0, 0);
+        bg.push(MESH.box, o.x - o.w * 0.5, o.h * 0.5, o.z - o.dp * 0.5 - 0.02, 0, 0, 0, 0.12, o.h * 0.94, 0.04, 1, 0.2, 0.55, 1, 0.9, 0, 0);
+        bg.push(MESH.box, o.x + o.w * 0.5, o.h * 0.5, o.z - o.dp * 0.5 - 0.02, 0, 0, 0, 0.12, o.h * 0.94, 0.04, 1, 0.2, 0.55, 1, 0.9, 0, 0);
+        bg.push(MESH.box, o.x, o.h * 0.5, o.z - o.dp * 0.5 - 0.02, 0, 0, 0, o.w * 0.8, 0.1, 0.04, 1, 0.2, 0.55, 1, 0.7, 0, 0);
+        break;
+      }
+      case 'beam': {
+        // slide-under barrier: one connected lit frame, never loose dark posts
+        const f = 0.6 + 0.4 * Math.sin(t * 14);
+        const top = o.y + o.h;
+        b.push(MESH.box, 0, o.y + o.h * 0.5, o.z, 0, 0, 0, o.w, o.h, o.dp, 0.34, 0.26, 0.20, 0.10, 3, 0, 0.3);
+        for (const s of [-1, 1]) {
+          b.push(MESH.box, s * (ROAD_HALF - 0.25), top * 0.5, o.z, 0, 0, 0, 0.42, top, 0.5, 0.30, 0.24, 0.22, 0.08, 1, 0, 0.4);
+          bg.push(MESH.box, s * (ROAD_HALF - 0.25), top * 0.5, o.z - 0.27, 0, 0, 0, 0.1, top * 0.92, 0.04, 1.0, 0.55, 0.15, 1, 0.85, 0, 0);
+        }
+        bg.push(MESH.box, 0, o.y - 0.02, o.z, 0, 0, 0, o.w, 0.16, o.dp * 1.25, 1.0, 0.35, 0.1, 1, f, 0, 0);
+        bg.push(MESH.box, 0, top, o.z, 0, 0, 0, o.w, 0.12, o.dp * 1.25, 1.0, 0.7, 0.15, 1, 0.9, 0, 0);
+        break;
+      }
+      case 'saw': {
+        const y = o.y + Math.sin(t * 3 + o.z) * 0.12;
+        for (let k = 0; k < 8; k++) {
+          const a = o.spin + k / 8 * TAU;
+          b.push(MESH.box, o.x + Math.cos(a) * 0.62, y + Math.sin(a) * 0.62, o.z, 0, 0, a, 0.42, 0.16, 0.5, 0.75, 0.78, 0.88, 0.1, 1, 0, 1);
+        }
+        b.push(MESH.cyl, o.x, y, o.z, PI / 2, o.spin, 0, 1.05, 1.05, 0.34, 0.5, 0.52, 0.65, 0.08, 1, 0, 1);
+        bg.push(MESH.ball, o.x, y, o.z, 0, 0, 0, 0.5, 0.5, 0.5, 1.0, 0.25, 0.1, 1, 0.9, 0, 0);
+        break;
+      }
+      case 'drone': {
+        const tilt = Math.sin(o.t * 2.4) * 0.16;
+        b.push(MESH.box, o.x, o.y + 1.1, o.z, tilt, 0, 0, 1.15, 0.5, 1.15, 0.34, 0.34, 0.50, 0.10, 1, 0, 0.7);
+        bg.push(MESH.ball, o.x, o.y + 1.1, o.z - 0.62, 0, 0, 0, 0.5, 0.5, 0.35, 1.0, 0.15, 0.3, 1, 0.9, 0, 0);
+        for (const s of [-1, 1]) {
+          b.push(MESH.box, o.x + s * 0.72, o.y + 1.35, o.z, tilt, 0, s * 0.3, 0.5, 0.09, 0.5, 0.36, 0.38, 0.55, 0.10, 1, 0, 0.6);
+          bg.push(MESH.torus, o.x + s * 0.72, o.y + 1.42, o.z, 0, o.t * 20, 0, 0.72, 0.72, 0.72, 0.3, 0.9, 1.0, 0.9, 0.35, 0, 0);
+        }
+        // legs
+        b.push(MESH.box, o.x, o.y + 0.55, o.z, 0, 0, 0, 0.14, 1.1, 0.14, 0.34, 0.34, 0.50, 0.08, 1, 0, 0.3);
+        bg.push(MESH.ball, o.x, o.y + 0.06, o.z, 0, 0, 0, 0.3, 0.12, 0.3, 1.0, 0.2, 0.4, 1, 0.8, 0, 0);
+        break;
+      }
+      case 'laser': {
+        for (const s of [-1, 1]) {
+          b.push(MESH.box, o.x + s * 0.95, 0.9, o.z, 0, 0, 0, 0.28, 1.8, 0.28, 0.32, 0.30, 0.48, 0.08, 1, 0, 0.5);
+          bg.push(MESH.ball, o.x + s * 0.95, 1.85, o.z, 0, 0, 0, 0.26, 0.26, 0.26, 1, 0.3, 0.1, o.on ? 1 : 0.25, 1, 0, 0);
+        }
+        if (o.on) {
+          const f = 0.65 + 0.35 * Math.sin(t * 30 + o.phase);
+          for (let k = 0; k < 3; k++) {
+            bg.push(MESH.box, o.x, 0.5 + k * 0.62, o.z, 0, 0, 0, 1.75, 0.1, 0.1, 1.0, 0.12, 0.2, 1, f * 0.9, 0, 0);
+          }
+          bg.push(MESH.box, o.x, 1.1, o.z, 0, 0, 0, 1.9, 1.5, 0.06, 1.0, 0.2, 0.35, 1, 0.16, 0, 0);
+        }
+        break;
+      }
+    }
+  }
+}
+
+function renderProps(b, bg) {
+  for (const p of World.props) {
+    if (p.z < -230 || p.z > 60) continue;
+    switch (p.m) {
+      case 'box': case 'cyl': case 'ball': {
+        const mesh = p.m === 'cyl' ? MESH.cyl : (p.m === 'ball' ? MESH.ball : MESH.box);
+        (p.glow ? bg : b).push(mesh, p.x, p.y, p.z, 0, p.rot || 0, 0, p.sx, p.sy, p.sz, p.c[0], p.c[1], p.c[2], p.e, 1, p.mode || 0, p.glow ? 0 : 0.3);
+        break;
+      }
+      case 'bld':
+        b.push(MESH.box, p.x, p.y, p.z, 0, 0, 0, p.sx, p.sy, p.sz, p.c[0], p.c[1], p.c[2], 0, 1, 1, 0.15);
+        break;
+      case 'sign': {
+        // frame + emissive face on both sides so the back is never a black slab
+        b.push(MESH.box, p.x, p.y, p.z, 0, 0, 0, p.sx * 1.1, p.sy * 1.1, 0.4, 0.16, 0.16, 0.26, 0.02, 1, 0, 0.2);
+        for (const s of [-1, 1]) {
+          bg.push(MESH.box, p.x, p.y, p.z + s * 0.24, 0, 0, 0, p.sx, p.sy, 0.05, p.c[0], p.c[1], p.c[2], 1, 0.92, 2, 0);
+          for (let k = 0; k < 4; k++) {
+            if ((p.glyph >> k & 1) === 0) continue;
+            bg.push(MESH.box, p.x + (k - 1.5) * p.sx * 0.22, p.y, p.z + s * 0.3, 0, 0, 0,
+              p.sx * 0.11, p.sy * (0.35 + 0.15 * k), 0.04, 0.05, 0.06, 0.1, 1, 0.95, 0, 0);
+          }
+        }
+        b.push(MESH.box, p.x, p.y - p.sy * 0.5 - 2.2, p.z, 0, 0, 0, 0.22, p.sy + 4.4, 0.22, 0.20, 0.20, 0.32, 0.04, 1, 0, 0.2);
+        break;
+      }
+      case 'arch': {
+        // legs stand clear of the deck; the lintel spans overhead
+        const W = ROAD_HALF + 2.6, H = 9.2;
+        b.push(MESH.box, -W, H * 0.5, p.z, 0, 0, 0, 0.55, H, 0.7, 0.30, 0.30, 0.46, 0.06, 1, 0, 0.4);
+        b.push(MESH.box, W, H * 0.5, p.z, 0, 0, 0, 0.55, H, 0.7, 0.30, 0.30, 0.46, 0.06, 1, 0, 0.4);
+        b.push(MESH.box, 0, H, p.z, 0, 0, 0, W * 2 + 0.55, 0.7, 0.85, 0.30, 0.30, 0.46, 0.06, 1, 0, 0.4);
+        bg.push(MESH.box, 0, H - 0.5, p.z - 0.5, 0, 0, 0, W * 2, 0.13, 0.13, p.c[0], p.c[1], p.c[2], 1, 0.9, 0, 0);
+        for (const s of [-1, 1]) {
+          bg.push(MESH.box, s * W, H * 0.5, p.z - 0.45, 0, 0, 0, 0.08, H * 0.96, 0.08, p.c[0], p.c[1], p.c[2], 1, 0.7, 0, 0);
+          bg.push(MESH.box, s * W, 0.16, p.z, 0, 0, 0, 1.5, 0.08, 1.5, p.c[0], p.c[1], p.c[2], 1, 0.75, 0, 0);
+        }
+        break;
+      }
+      case 'ring': {
+        // decorative holo ring: fade out just before it would swim through the
+        // camera, otherwise it blooms into a wall of colour across the view
+        const a = clamp((1.0 - p.z) / 5.0, 0, 1);
+        if (a <= 0.01) break;
+        const r = p.rot || 0;
+        bg.push(MESH.torus, p.x, p.y, p.z, PI / 2, r, 0, p.sx, p.sy, p.sz, p.c[0], p.c[1], p.c[2], 1, 0.5 * a, 0, 0);
+        bg.push(MESH.torus, p.x, p.y, p.z, PI / 2, -r * 1.4, 0.4, p.sx * 0.78, p.sy * 0.78, p.sz * 0.78, p.c[0], p.c[1], p.c[2], 1, 0.35 * a, 0, 0);
+        break;
+      }
+      case 'car': {
+        b.push(MESH.box, p.x, p.y, p.z, 0, 0, 0, p.sx, p.sy, p.sz, p.c[0], p.c[1], p.c[2], 0.02, 1, 0, 0.8);
+        b.push(MESH.box, p.x, p.y + 0.42, p.z + 0.1, 0, 0, 0, p.sx * 0.72, 0.4, p.sz * 0.5, 0.07, 0.08, 0.13, 0, 1, 0, 0.6);
+        const gc = p.glowC;
+        const dirSign = p.spd > 0 ? -1 : 1;
+        bg.push(MESH.box, p.x, p.y + 0.05, p.z + dirSign * p.sz * 0.5, 0, 0, 0, p.sx * 0.8, 0.16, 0.1, 1, 0.95, 0.9, 1, 0.9, 0, 0);
+        bg.push(MESH.box, p.x, p.y + 0.02, p.z - dirSign * p.sz * 0.5, 0, 0, 0, p.sx * 0.9, 0.12, 0.12, gc[0], gc[1], gc[2], 1, 0.85, 0, 0);
+        bg.push(MESH.box, p.x, p.y - 0.42, p.z, 0, 0, 0, p.sx * 1.1, 0.05, p.sz * 0.9, gc[0], gc[1], gc[2], 1, 0.3, 0, 0);
+        break;
+      }
+    }
+  }
+  // distant skyline
+  for (const f of World.far) {
+    if (f.z < -460 || f.z > 90) continue;
+    b.push(MESH.box, f.x, f.h * 0.5 - 4, f.z, 0, 0, 0, f.w, f.h, f.d, f.c[0], f.c[1], f.c[2], 0, 1, 1, 0);
+    if (f.top) b.push(MESH.box, f.x, f.h - 4.4, f.z, 0, 0, 0, f.w * 0.5, 0.8, f.d * 0.5, f.top[0], f.top[1], f.top[2], 1, 0.9, 0, 0);
+  }
+}
+/* ============================== CAMERA ============================== */
+const Cam = {
+  x: 0, y: 4.4, z: 9.6, tx: 0, ty: 4.4, tz: 9.6,
+  yaw: 0, pitch: -0.06, roll: 0, fov: 1.02,
+  update(dt) {
+    const G = Game, P = Player;
+    const boost = (G.boostTimer > 0 ? 1 : 0) + (G.dashTimer > 0 ? 0.7 : 0);
+    const spd01 = clamp((G.speed - 17) / 22, 0, 1);
+
+    // chase distance stretches with speed -> the "everything is faster" cue
+    this.tz = 9.4 + spd01 * 2.6 + boost * 2.2;
+    this.ty = 4.15 + spd01 * 0.9 + P.y * 0.30 + boost * 0.3;
+    this.tx = P.x * 0.62 + P.vx * 0.075;
+
+    const k = 1 - Math.pow(0.0008, dt);
+    this.x = lerp(this.x, this.tx, k);
+    this.y = lerp(this.y, this.ty, 1 - Math.pow(0.004, dt));
+    this.z = lerp(this.z, this.tz, 1 - Math.pow(0.006, dt));
+
+    const targetFov = 1.00 + spd01 * 0.20 + boost * 0.16 + (P.grounded ? 0 : 0.02);
+    this.fov = lerp(this.fov, targetFov, 1 - Math.pow(0.002, dt));
+    this.roll = lerp(this.roll, -P.lean * 0.10, 1 - Math.pow(0.002, dt));
+    this.yaw = lerp(this.yaw, -P.vx * 0.012, 1 - Math.pow(0.004, dt));
+    this.pitch = -0.075 - spd01 * 0.022 + clamp(P.y * 0.012, -0.05, 0.12);
+
+    // screen shake
+    if (G.shake > 0) {
+      G.shake = Math.max(0, G.shake - dt * 2.6);
+      const s = G.shake * G.shake;
+      G.shakeX = (Math.random() * 2 - 1) * s * 1.5;
+      G.shakeY = (Math.random() * 2 - 1) * s * 1.2;
+      this.roll += (Math.random() * 2 - 1) * s * 0.5;
+    } else { G.shakeX = 0; G.shakeY = 0; }
+  }
+};
+
+/* ============================ ROAD GEOMETRY ========================== */
+const ROAD_VERTS = (() => {
+  const segs = 90, near = 12, far = -235;
+  const arr = new Float32Array((segs + 1) * 2 * 3);
+  return { arr, segs, near, far };
+})();
+function buildRoad(scroll) {
+  const { arr, segs, near, far } = ROAD_VERTS;
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const z = -Math.pow(t, 1.35) * 235 + 12;
+    const w = ROAD_HALF + 3.0;
+    arr[i * 6 + 0] = -w; arr[i * 6 + 1] = 0; arr[i * 6 + 2] = z;
+    arr[i * 6 + 3] = w; arr[i * 6 + 4] = 0; arr[i * 6 + 5] = z;
+  }
+  const idx = [];
+  for (let i = 0; i < segs; i++) {
+    const a = i * 2;
+    idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+  }
+  return new Uint16Array(idx);
+}
+// NOTE: buildRoad() fills ROAD_VERTS.arr in place, so it must run *before* the
+// vertex data is uploaded. Uploading first silently produced a degenerate mesh.
+const roadIndices = buildRoad(0);
+const roadVBO = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, roadVBO);
+gl.bufferData(gl.ARRAY_BUFFER, ROAD_VERTS.arr, gl.STATIC_DRAW);
+const roadIBO = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, roadIBO);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, roadIndices, gl.STATIC_DRAW);
+const roadIndexCount = roadIndices.length;
+
+const skyVBO = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, skyVBO);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+
+/* ============================== RENDER =============================== */
+let DPR = 1, VW = 1, VH = 1;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 1.75);
+  VW = Math.floor(innerWidth * DPR); VH = Math.floor(innerHeight * DPR);
+  canvas.width = VW; canvas.height = VH;
+  canvas.style.width = innerWidth + 'px'; canvas.style.height = innerHeight + 'px';
+  gl.viewport(0, 0, VW, VH);
+}
+addEventListener('resize', resize); resize();
+
+gl.clearColor(0.02, 0.02, 0.05, 1);
+gl.enable(gl.DEPTH_TEST);
+gl.depthFunc(gl.LEQUAL);
+gl.enable(gl.CULL_FACE);
+gl.cullFace(gl.BACK);
+
+function render() {
+  const G = Game;
+  const aspect = VW / VH;
+  const fov = Cam.fov;
+
+  // camera basis
+  const cp = Math.cos(Cam.pitch), sp = Math.sin(Cam.pitch);
+  const cy = Math.cos(Cam.yaw), sy = Math.sin(Cam.yaw);
+  const fwd = [sy * cp, sp, -cy * cp];
+  const right = [cy, 0, sy];
+  const up = [0, 0, 0];   // up = cross(right, fwd)
+  up[0] = right[1] * fwd[2] - right[2] * fwd[1];
+  up[1] = right[2] * fwd[0] - right[0] * fwd[2];
+  up[2] = right[0] * fwd[1] - right[1] * fwd[0];
+
+  const camX = Cam.x + G.shakeX, camY = Cam.y + G.shakeY, camZ = Cam.z;
+  const cx = camX + fwd[0] * 10, cy2 = camY + fwd[1] * 10, cz = camZ + fwd[2] * 10;
+
+  perspective(PROJ, fov, aspect, 0.25, 900);
+  lookAt(VIEW, camX, camY, camZ, cx, cy2, cz, Math.sin(Cam.roll) * 0.4, Math.cos(Cam.roll), 0);
+  mul4(VP, PROJ, VIEW);
+
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  /* ---- sky ---- */
+  gl.disable(gl.DEPTH_TEST);
+  gl.depthMask(false);
+  gl.useProgram(SPROG.p);
+  gl.bindBuffer(gl.ARRAY_BUFFER, skyVBO);
+  gl.enableVertexAttribArray(SPROG.a.aXY);
+  gl.vertexAttribPointer(SPROG.a.aXY, 2, gl.FLOAT, false, 0, 0);
+  gl.uniform3fv(SPROG.u.uFwd, fwd);
+  gl.uniform3fv(SPROG.u.uRight, right);
+  gl.uniform3fv(SPROG.u.uUp, up);
+  gl.uniform1f(SPROG.u.uAspect, aspect);
+  gl.uniform1f(SPROG.u.uTanHalf, Math.tan(fov / 2));
+  gl.uniform1f(SPROG.u.uTime, G.t);
+  gl.uniform1f(SPROG.u.uSpeed01, clamp((G.speed - 17) / 22, 0, 1));
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.enable(gl.DEPTH_TEST); gl.depthMask(true);
+
+  /* ---- road ---- */
+  gl.useProgram(RPROG.p);
+  gl.uniformMatrix4fv(RPROG.u.uVP, false, VP);
+  gl.uniform1f(RPROG.u.uScroll, World.scroll);
+  gl.uniform1f(RPROG.u.uTime, G.t);
+  gl.uniform3fv(RPROG.u.uAccent, [0.16, 0.9, 1.0]);
+  gl.uniform3fv(RPROG.u.uAccent2, [1.0, 0.18, 0.6]);
+  gl.uniform1f(RPROG.u.uBoost, G.boostTimer > 0 ? 1 : (G.dashTimer > 0 ? 0.8 : 0));
+  gl.uniform1f(RPROG.u.uRoadW, ROAD_HALF);
+  gl.uniform1f(RPROG.u.uSpeed01, clamp((G.speed - 17) / 22, 0, 1));
+  gl.bindBuffer(gl.ARRAY_BUFFER, roadVBO);
+  gl.enableVertexAttribArray(RPROG.a.aPos);
+  gl.vertexAttribPointer(RPROG.a.aPos, 3, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, roadIBO);
+  gl.drawElements(gl.TRIANGLES, roadIndexCount, gl.UNSIGNED_SHORT, 0);
+
+  /* ---- world batches ---- */
+  opaque.reset(); glow.reset();
+  renderProps(opaque, glowProps);
+  renderObjects(opaque, glowObjs);
+  if (G.state !== 'over') Player.render(opaque, glow);
+  Particles.render(opaque, glow);
+
+  gl.useProgram(WPROG.p);
+  gl.uniformMatrix4fv(WPROG.u.uVP, false, VP);
+  gl.uniform3f(WPROG.u.uCamPos, camX, camY, camZ);
+  gl.uniform3f(WPROG.u.uLightDir, -0.35, 0.85, -0.4);
+  gl.uniform3f(WPROG.u.uSkyTint, 0.42, 0.30, 0.75);
+  gl.uniform3f(WPROG.u.uGroundTint, 0.1, 0.05, 0.15);
+  gl.uniform3f(WPROG.u.uFogNear, 0.10, 0.03, 0.19);
+  gl.uniform3f(WPROG.u.uFogFar, 0.05, 0.035, 0.115);
+  gl.uniform1f(WPROG.u.uFogDensity, 0.0062);
+  gl.uniform1f(WPROG.u.uTime, G.t);
+
+  gl.uniform1f(WPROG.u.uGlow, 0);
+  gl.disable(gl.BLEND);
+  opaque.draw(WPROG);
+
+  // additive glow pass
+  gl.uniform1f(WPROG.u.uGlow, 1);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+  gl.depthMask(false);
+  glow.draw(WPROG);
+  gl.depthMask(true);
+  gl.disable(gl.BLEND);
+}
+
+/* ============================ HUD UPDATE ============================= */
+let hudScoreShown = 0;
+function updateHUD(dt) {
+  const G = Game;
+  hudScoreShown = lerp(hudScoreShown, G.score, 1 - Math.pow(0.0001, dt));
+  UI.score.textContent = Math.floor(hudScoreShown).toLocaleString();
+  UI.best.textContent = G.best.toLocaleString();
+  UI.dist.innerHTML = Math.floor(G.dist) + '<small>M</small>';
+  const kmh = Math.round(G.speed * 7.2);
+  UI.speed.innerHTML = kmh + '<small>KM/H</small>';
+  UI.speedFill.style.width = (clamp((G.speed - 15) / 24, 0, 1) * 100).toFixed(1) + '%';
+  UI.combo.classList.toggle('on', G.combo > 1);
+  UI.combo.textContent = 'x' + G.combo;
+  UI.shieldPip.classList.toggle('on', G.shield);
+  const ready = G.dashCd <= 0;
+  UI.dashPip.style.setProperty('--dash', (1 - clamp(G.dashCd / 1.45, 0, 1)).toFixed(3));
+  UI.dashPip.classList.toggle('ready', ready);
+}
+
+/* ============================= MAIN LOOP ============================= */
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  let dt = (now - last) / 1000;
+  last = now;
+  if (dt > 0.05) dt = 0.05;
+  if (dt <= 0) dt = 1 / 60;
+
+  const G = Game;
+  G.frame++;
+
+  if (G.state === 'play') {
+    // hit-stop then slow-mo recovery for impact weight
+    if (G.hitStop > 0) { G.hitStop -= dt; G.slowmo = 0.12; }
+    else G.slowmo = lerp(G.slowmo, 1, 1 - Math.pow(0.0005, dt));
+    const sdt = dt * G.slowmo;
+
+    G.t += sdt;
+
+    // ---- pace: relentless acceleration, plus overdrive ----
+    const base = 17 + Math.min(19, G.dist * 0.0088);
+    G.speedBase = base;
+    if (G.boostTimer > 0) G.boostTimer -= sdt;
+    if (G.dashCd > 0) G.dashCd -= sdt;
+    G.speed = base + (G.boostTimer > 0 ? 13 : 0) + (G.dashTimer > 0 ? 16 : 0);
+    G.topSpeed = Math.max(G.topSpeed, G.speed);
+
+    G.dist += G.speed * sdt;
+    G.score += G.speed * sdt * 1.15;
+
+    // combo decay
+    if (G.comboTimer > 0) { G.comboTimer -= sdt; if (G.comboTimer <= 0) { G.combo = 1; G.streakNear = 0; } }
+
+    // invulnerability after respawn / shield break
+    if (G.invuln > 0) G.invuln -= sdt;
+    if (G.shieldFlash > 0) G.shieldFlash = Math.max(0, G.shieldFlash - sdt * 2.2);
+    if (G.pickupPulse > 0) G.pickupPulse = Math.max(0, G.pickupPulse - sdt * 3);
+
+    Player.update(sdt);
+    World.update(sdt, G.speed);
+    Particles.update(sdt);
+    checkCollisions();
+    nearMissCheck();
+    Cam.update(sdt);
+
+    // milestones
+    if (G.dist >= G.nextMilestone) {
+      const n = G.nextMilestone / 250;
+      UI.toast(['', 'SPEED UP', 'RIDE THE LIGHT', 'UNTOUCHABLE', 'SKYWAY KING', 'GHOST PROTOCOL', 'OVERDRIVE GOD'][Math.min(6, n)] || 'LEGEND', '#37f2ff');
+      Audio_.milestone(n);
+      UI.flash('#37f2ff', 0.16);
+      G.nextMilestone += 250;
+      G.addScore(200);
+    }
+
+    // ambient speed particles
+    if (G.frame % 2 === 0) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      Particles.spawn({
+        x: side * rand(3, 9), y: rand(0.3, 6), z: rand(-60, -25),
+        vx: 0, vy: rand(-0.3, 0.3), vz: 0, g: 0, drag: 1,
+        r: 0.35, g: 0.9, b: 1.0, life: 1.4, size: 0.07
+      });
+    }
+    Audio_.musicTick();
+    Audio_.intensity = clamp((G.speed - 17) / 20, 0, 1);
+    updateHUD(dt);
+  } else if (G.state === 'menu') {
+    G.t += dt;
+    // idle fly-through of the city behind the menu
+    World.scroll += 14 * dt;
+    for (const o of World.objs) o.z += 14 * dt;
+    for (const p of World.props) { p.z += 14 * dt; if (p.m === 'car') p.alt += dt; if (p.spin) p.rot = (p.rot || 0) + p.spin * dt; }
+    for (const f of World.far) { f.z += 14 * dt; if (f.z > 90) f.z -= f.loop; }
+    while (World.spawnZ > -World.lookAhead) World.generateChunk();
+    for (let i = World.objs.length - 1; i >= 0; i--) if (World.objs[i].z > 24) World.objs.splice(i, 1);
+    for (let i = World.props.length - 1; i >= 0; i--) if (World.props[i].z > 60 || World.props[i].z < -420) World.props.splice(i, 1);
+    Particles.update(dt);
+    Cam.x = Math.sin(G.t * 0.25) * 3.2;
+    Cam.y = 4.6 + Math.sin(G.t * 0.18) * 0.8;
+    Cam.z = 10.5;
+    Cam.yaw = Math.sin(G.t * 0.16) * 0.10;
+    Cam.pitch = -0.05;
+    Cam.roll = Math.sin(G.t * 0.13) * 0.02;
+    Cam.fov = 0.95;
+  } else if (G.state === 'over') {
+    G.t += dt * 0.35;
+    Particles.update(dt * 0.6);
+    Cam.y = lerp(Cam.y, 3.0, 1 - Math.pow(0.2, dt));
+    Cam.z = lerp(Cam.z, 7.2, 1 - Math.pow(0.2, dt));
+    Cam.x = lerp(Cam.x, Player.x * 0.5, 1 - Math.pow(0.2, dt));
+    Cam.roll = lerp(Cam.roll, 0.12, 1 - Math.pow(0.3, dt));
+    // countdown back to the title screen
+    if (G.overCount > 0) {
+      G.overCount -= dt;
+      const s = Math.ceil(G.overCount);
+      if (s !== G._overShown) { G._overShown = s; UI.overCount.textContent = Math.max(0, s); }
+      if (G.overCount <= 0) G.toMenu();
+    }
+  }
+
+  render();
+}
+
+/* =============================== BOOT ================================ */
+UI.best && ($('menuBest').textContent = Game.best.toLocaleString());
+$('startBtn').addEventListener('click', () => Game.start());
+$('againBtn').addEventListener('click', () => Game.start());
+UI.menu.addEventListener('pointerdown', () => { Audio_.init(); Audio_.resume(); });
+Input.init();
+World.reset();
+Game.state = 'menu';
+requestAnimationFrame(frame);
+
+// pause audio when tab is hidden
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && Game.state === 'play') Game.togglePause();
+});
+</script>
+</body>
+</html>

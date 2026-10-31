@@ -1,0 +1,1649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>KONG — a WebGL arcade climb</title>
+<style>
+  :root{
+    --ink:#f2f5ff; --accent:#ffcf3f; --danger:#ff4d4d;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:#000;
+    color:var(--ink);
+    font-family:"Consolas","Courier New",ui-monospace,monospace;
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden;
+    -webkit-user-select:none; user-select:none;
+  }
+  #wrap{display:flex; flex-direction:column; align-items:center; gap:8px; padding:10px}
+  #stage{
+    position:relative;
+    width:min(92vw, calc((92vh - 96px) * 0.875));
+    aspect-ratio:448 / 512;
+    background:#000;
+    border:0;
+    box-shadow:0 18px 60px rgba(0,0,0,.75);
+    overflow:hidden;
+  }
+  canvas{display:block; width:100%; height:100%; image-rendering:pixelated}
+  /* CRT-ish scanlines + vignette */
+  #stage::after{
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:
+      repeating-linear-gradient(to bottom, rgba(0,0,0,.22) 0 1px, rgba(0,0,0,0) 1px 3px),
+      radial-gradient(120% 100% at 50% 50%, rgba(0,0,0,0) 55%, rgba(0,0,0,.55) 100%);
+    mix-blend-mode:multiply;
+  }
+  #msg{
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:1.1em; text-align:center;
+    font-size:clamp(13px,2.9vmin,30px); letter-spacing:.22em; text-transform:uppercase;
+    text-shadow:0 0 12px rgba(0,0,0,.9), 0 3px 0 #000;
+    pointer-events:none; padding:6%;
+    background:rgba(2,4,12,0);
+    transition:background .25s ease;
+  }
+  #msg:not(:empty){ background:rgba(2,4,12,.66); }
+  #msg .big{color:var(--accent); font-size:1.5em}
+  #msg .sub{color:#cfe0ff; font-size:.72em; letter-spacing:.18em}
+  #msg .blink{animation:blink .8s steps(2,end) infinite}
+  @keyframes blink{50%{opacity:0}}
+  #foot{
+    color:#6d87a8; font-size:clamp(9px,1.3vmin,14px); letter-spacing:.13em; text-align:center;
+  }
+  kbd{
+    background:#111a2c; border:1px solid #2c3f63; border-bottom-width:2px; border-radius:3px;
+    padding:1px 5px; color:#cfe0ff; font:inherit; font-size:.95em;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <canvas id="gl"></canvas>
+    <div id="msg"></div>
+  </div>
+  <div id="foot">
+    <kbd>←</kbd><kbd>→</kbd> move &nbsp;·&nbsp; <kbd>↑</kbd><kbd>↓</kbd> climb &nbsp;·&nbsp;
+    <kbd>space</kbd> jump &nbsp;·&nbsp; <kbd>enter</kbd> start &nbsp;·&nbsp; <kbd>P</kbd> pause &nbsp;·&nbsp; <kbd>M</kbd> mute
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   KONG — a tiny WebGL arcade climbing game (single file)
+   World is drawn as coloured quads in a 448x512 virtual space.
+   ============================================================ */
+
+const VW = 448, VH = 512;
+
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl', { antialias: false, alpha: false, preserveDrawingBuffer: false })
+        || canvas.getContext('experimental-webgl');
+
+const msgEl = document.getElementById('msg');
+if (!gl) {
+  msgEl.innerHTML = '<div class="big">WebGL unavailable</div><div class="sub">Try another browser or enable hardware acceleration.</div>';
+  throw new Error('no webgl');
+}
+
+/* ---------- shader plumbing ---------- */
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, `
+  attribute vec2 aPos;
+  attribute vec4 aCol;
+  uniform vec2 uRes;
+  uniform vec2 uOff;
+  varying vec4 vCol;
+  void main(){
+    gl_Position = vec4((aPos.x + uOff.x) / uRes.x * 2.0 - 1.0, 1.0 - (aPos.y + uOff.y) / uRes.y * 2.0, 0.0, 1.0);
+    vCol = aCol;
+  }`));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, `
+  precision mediump float;
+  varying vec4 vCol;
+  void main(){ gl_FragColor = vCol; }`));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+const uRes = gl.getUniformLocation(prog, 'uRes');
+const uOff = gl.getUniformLocation(prog, 'uOff');
+const aPos = gl.getAttribLocation(prog, 'aPos');
+const aCol = gl.getAttribLocation(prog, 'aCol');
+gl.enableVertexAttribArray(aPos);
+gl.enableVertexAttribArray(aCol);
+gl.enable(gl.BLEND);
+gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+/* ---------- immediate-mode quad batcher ---------- */
+const MAXQ = 20000, VPQ = 6, NF = 6; // 6 verts, 6 floats (xy + rgba) per vertex
+const INV255 = 1 / 255;
+const batch = new Float32Array(MAXQ * VPQ * NF);
+let qn = 0;
+let offX = 0, offY = 0;   // world shake offset, applied in the shader via uOff; zeroed for the HUD
+const vbo = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+gl.bufferData(gl.ARRAY_BUFFER, batch.byteLength, gl.DYNAMIC_DRAW);
+const STRIDE = NF * 4;
+
+function begin() { qn = 0; }
+
+/** Axis-aligned quad. x,y = top-left in virtual px (y grows down). col = [r,g,b,a?] 0..255 */
+function rect(x, y, w, h, col) {
+  if (qn >= MAXQ || w <= 0 || h <= 0) return;
+  const a = col.length > 3 ? col[3] : 1;
+  const r = col[0] * INV255, g = col[1] * INV255, b = col[2] * INV255;
+  let o = qn * VPQ * NF;
+  const x2 = x + w, y2 = y + h;
+  // tri 1
+  batch[o] = x;  batch[o+1] = y;  batch[o+2] = r; batch[o+3] = g; batch[o+4] = b; batch[o+5] = a; o += NF;
+  batch[o] = x2; batch[o+1] = y;  batch[o+2] = r; batch[o+3] = g; batch[o+4] = b; batch[o+5] = a; o += NF;
+  batch[o] = x2; batch[o+1] = y2; batch[o+2] = r; batch[o+3] = g; batch[o+4] = b; batch[o+5] = a; o += NF;
+  // tri 2
+  batch[o] = x;  batch[o+1] = y;  batch[o+2] = r; batch[o+3] = g; batch[o+4] = b; batch[o+5] = a; o += NF;
+  batch[o] = x2; batch[o+1] = y2; batch[o+2] = r; batch[o+3] = g; batch[o+4] = b; batch[o+5] = a; o += NF;
+  batch[o] = x;  batch[o+1] = y2; batch[o+2] = r; batch[o+3] = g; batch[o+4] = b; batch[o+5] = a;
+  qn++;
+}
+/** Rotated quad. cx,cy = centre, w along the rotated local x, ang in radians. */
+function rotRect(cx, cy, w, h, ang, col) {
+  if (qn >= MAXQ || w <= 0 || h <= 0) return;
+  const a = col.length > 3 ? col[3] : 1;
+  const r = col[0] * INV255, g = col[1] * INV255, b = col[2] * INV255;
+  const c = Math.cos(ang), s = Math.sin(ang), hw = w / 2, hh = h / 2;
+  const x0 = cx - hw * c + hh * s, y0 = cy - hw * s - hh * c;
+  const x1 = cx + hw * c + hh * s, y1 = cy + hw * s - hh * c;
+  const x2 = cx + hw * c - hh * s, y2 = cy + hw * s + hh * c;
+  const x3 = cx - hw * c - hh * s, y3 = cy - hw * s + hh * c;
+  let o = qn * VPQ * NF;
+  batch[o] = x0; batch[o+1] = y0; batch[o+2] = r; batch[o+3] = g; batch[o+4] = b; batch[o+5] = a; o += NF;
+  batch[o] = x1; batch[o+1] = y1; batch[o+2] = r; batch[o+3] = g; batch[o+4] = b; batch[o+5] = a; o += NF;
+  batch[o] = x2; batch[o+1] = y2; batch[o+2] = r; batch[o+3] = g; batch[o+4] = b; batch[o+5] = a; o += NF;
+  batch[o] = x0; batch[o+1] = y0; batch[o+2] = r; batch[o+3] = g; batch[o+4] = b; batch[o+5] = a; o += NF;
+  batch[o] = x2; batch[o+1] = y2; batch[o+2] = r; batch[o+3] = g; batch[o+4] = b; batch[o+5] = a; o += NF;
+  batch[o] = x3; batch[o+1] = y3; batch[o+2] = r; batch[o+3] = g; batch[o+4] = b; batch[o+5] = a;
+  qn++;
+}
+function setPointers() {
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, STRIDE, 0);
+  gl.vertexAttribPointer(aCol, 4, gl.FLOAT, false, STRIDE, 8);
+}
+
+/** Upload and draw the dynamic batch with the current shake offset. */
+function flush() {
+  if (!qn) return;
+  gl.uniform2f(uOff, offX, offY);
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, batch.subarray(0, qn * VPQ * NF));
+  setPointers();
+  gl.drawArrays(gl.TRIANGLES, 0, qn * VPQ);
+}
+
+/* Static world cache: girders + ladders never change within a level, so they
+   are built once into their own VBO and drawn in a single call per frame. */
+const staticVBO = gl.createBuffer();
+let staticCount = 0;
+function buildStatic() {
+  qn = 0;
+  for (const g of girders) drawGirder(g);
+  drawGirder(platform);
+  for (const l of ladders) drawLadder(l);
+  staticCount = qn;
+  gl.bindBuffer(gl.ARRAY_BUFFER, staticVBO);
+  gl.bufferData(gl.ARRAY_BUFFER, batch.subarray(0, qn * VPQ * NF), gl.STATIC_DRAW);
+  qn = 0;
+}
+function drawStatic() {
+  if (!staticCount) return;
+  gl.uniform2f(uOff, offX, offY);
+  gl.bindBuffer(gl.ARRAY_BUFFER, staticVBO);
+  setPointers();
+  gl.drawArrays(gl.TRIANGLES, 0, staticCount * VPQ);
+}
+
+/* ---------- palette ---------- */
+const COL = {
+  // arcade: girders are a saturated pinkish-red with a brighter top edge
+  girder:     [224, 60, 72],
+  girderDark: [136, 16, 32],
+  girderLite: [248, 132, 140],
+  girderHole: [0, 0, 0],
+  ladder:     [40, 224, 248],
+  ladderDark: [16, 132, 168],
+  broken:     [176, 128, 72],
+  hatRed:     [238, 48, 36],
+  skin:       [252, 188, 138],
+  overall:    [56, 96, 220],
+  boot:       [122, 72, 34],
+  hair:       [92, 48, 20],
+  kong:       [140, 82, 40],
+  kongDark:   [92, 52, 24],
+  kongFace:   [226, 178, 122],
+  pauline:    [240, 96, 168],
+  paulineDk:  [176, 46, 116],
+  barrel:     [196, 128, 48],
+  barrelDk:   [122, 74, 24],
+  barrelLt:   [238, 176, 92],
+  fire1:      [255, 214, 64],
+  fire2:      [255, 122, 26],
+  fire3:      [214, 40, 30],
+  drum:       [40, 72, 224],
+  drumDk:     [16, 32, 128],
+  hammer:     [226, 196, 120],
+  hammerDk:   [140, 108, 56],
+  white:      [245, 248, 255],
+  black:      [0, 0, 0],
+  clear:      [70, 255, 170],
+};
+
+/* ---------- canvas sizing ---------- */
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const r = canvas.getBoundingClientRect();
+  const w = Math.max(1, Math.round(r.width * dpr));
+  const h = Math.max(1, Math.round(r.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+}
+window.addEventListener('resize', resize);
+
+/* ============================================================
+   INPUT
+   ============================================================ */
+const keys = Object.create(null);
+const pressed = Object.create(null);
+const KEYMAP = {
+  ArrowLeft:'left', KeyA:'left', ArrowRight:'right', KeyD:'right',
+  ArrowUp:'up', KeyW:'up', ArrowDown:'down', KeyS:'down',
+  Space:'jump', KeyZ:'jump', KeyJ:'jump', Enter:'start', NumpadEnter:'start', KeyM:'mute', KeyP:'pause'
+};
+addEventListener('keydown', e => {
+  const k = KEYMAP[e.code];
+  if (!k) return;
+  e.preventDefault();
+  if (!keys[k]) pressed[k] = true;
+  keys[k] = true;
+  audioUnlock();
+  if (e.repeat) return;                            // ignore OS key auto-repeat
+  if (k === 'mute') muted = !muted;
+  if (k === 'pause') {
+    if (G.mode === 'play') setMode('paused');
+    else if (G.mode === 'paused') setMode('play');
+  }
+});
+addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) { e.preventDefault(); keys[k] = false; } });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+/* touch / mouse: left half = left, right half = right, top = jump */
+let touchL = false, touchR = false, touchJ = false;
+function touchHandler(e) {
+  const wasJ = touchJ;
+  touchL = touchR = touchJ = false;
+  for (const t of e.touches) {
+    const r = canvas.getBoundingClientRect();
+    const rx = (t.clientX - r.left) / r.width, ry = (t.clientY - r.top) / r.height;
+    if (ry < 0.45) touchJ = true;
+    else if (rx < 0.5) touchL = true;
+    else touchR = true;
+  }
+  // edge-trigger the jump so holding the top zone does not bunny-hop
+  if (touchJ && !wasJ) pressed.jump = true;
+  // only start a game from the screens that offer one, never mid-play
+  if (e.touches.length && (G.mode === 'title' || G.mode === 'gameover')) pressed.start = true;
+  audioUnlock();
+  e.preventDefault();
+}
+canvas.addEventListener('touchstart', touchHandler, { passive: false });
+canvas.addEventListener('touchmove', touchHandler, { passive: false });
+canvas.addEventListener('touchend', touchHandler, { passive: false });
+canvas.addEventListener('mousedown', () => { audioUnlock(); pressed.start = true; });
+
+/* ============================================================
+   AUDIO (tiny square-wave arcade beeper)
+   ============================================================ */
+let actx = null, muted = false, masterGain = null;
+function audioUnlock() {
+  if (actx || typeof AudioContext === 'undefined') return;
+  try {
+    actx = new AudioContext();
+    masterGain = actx.createGain();
+    masterGain.gain.value = 0.16;
+    masterGain.connect(actx.destination);
+  } catch (e) { actx = null; }
+}
+function tone(freq, dur, type, vol, slideTo, delay) {
+  if (!actx || muted) return;
+  const t0 = actx.currentTime + (delay || 0);
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type || 'square';
+  o.frequency.setValueAtTime(freq, t0);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol == null ? 0.5 : vol, t0 + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(masterGain);
+  o.start(t0); o.stop(t0 + dur + 0.02);
+}
+function noise(dur, vol) {
+  if (!actx || muted) return;
+  const n = Math.floor(actx.sampleRate * dur);
+  const buf = actx.createBuffer(1, n, actx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+  const s = actx.createBufferSource(); s.buffer = buf;
+  const g = actx.createGain(); g.gain.value = vol == null ? 0.35 : vol;
+  s.connect(g); g.connect(masterGain); s.start();
+}
+const SFX = {
+  jump:      () => tone(300, 0.16, 'square', 0.45, 620),
+  climb:     () => tone(520, 0.035, 'square', 0.18),
+  points:    () => { tone(880, 0.07, 'square', 0.4); tone(1320, 0.09, 'square', 0.35, null, 0.06); },
+  hammer:    () => { tone(180, 0.05, 'sawtooth', 0.5, 90); noise(0.12, 0.3); },
+  grab:      () => { tone(660, 0.06, 'square', 0.4); tone(990, 0.08, 'square', 0.35, null, 0.05); },
+  stomp:     () => { tone(140, 0.1, 'square', 0.5, 60); noise(0.08, 0.25); },
+  death:     () => { tone(420, 0.5, 'sawtooth', 0.5, 60); noise(0.35, 0.25); },
+  complete:  () => { [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => tone(f, 0.16, 'square', 0.4, null, i * 0.11)); },
+  throw:     () => tone(200, 0.09, 'triangle', 0.3, 120),
+  fireball:  () => tone(120, 0.18, 'sawtooth', 0.28, 320),
+  bonus:     () => { for (let i = 0; i < 4; i++) tone(1200 + i * 200, 0.05, 'square', 0.25, null, i * 0.05); },
+  start:     () => { [392, 523, 659, 784].forEach((f, i) => tone(f, 0.12, 'square', 0.4, null, i * 0.09)); },
+};
+
+/* ============================================================
+   LEVEL GEOMETRY
+   Virtual space: 448 x 512, y grows downward.
+   ============================================================ */
+function Girder(x1, y1, x2, y2) {
+  const g = { x1, y1, x2, y2, y: y1 };
+  g.m = (y2 - y1) / (x2 - x1);
+  g.yAt = x => y1 + g.m * (x - x1);
+  g.roll = (y2 - y1) >= 0 ? 1 : -1;   // direction gravity takes a rolling barrel
+  return g;
+}
+
+let girders = [], ladders = [], platform = null;
+const DRUM = { x: 12, y: 456 };   // bottom-left, as in the arcade; y set in buildLevel
+
+function buildLevel() {
+  girders = [
+    Girder(0, 492, 448, 484),      // 0 ground: slight fall toward the oil drum (left)
+    Girder(0, 419, 412, 446),      // 1 open at right end
+    Girder(36, 381, 448, 353),     // 2 open at left end
+    Girder(0, 288, 412, 315),      // 3 open at right end
+    Girder(36, 250, 448, 222),     // 4 open at left end
+    Girder(0, 167, 412, 176),      // 5  (Donkey Kong's floor, nearly flat)
+  ];
+  platform = Girder(175, 112, 270, 112); // Pauline's platform
+  DRUM.y = girders[0].yAt(DRUM.x + 10) - 20;   // sit the drum on the ground
+
+  // Ladders connect the surface of girder `gi` (yBottom) up to girder `gi+1` (yTop).
+  const L = (gi, x, broken) => {
+    const below = girders[gi], above = girders[gi + 1] || platform;
+    ladders.push({ x, yBottom: below.yAt(x), yTop: above.yAt(x), broken: !!broken });
+  };
+  ladders = [];
+  L(0, 53, true);  L(0, 166, true); L(0, 374);
+  L(1, 70);  L(1, 198);
+  L(2, 137, true); L(2, 230); L(2, 374);
+  L(3, 70);  L(3, 150); L(3, 342, true);
+  L(4, 182, true); L(4, 374);
+  L(5, 190); L(5, 226); L(5, 262);         // up to Pauline's platform (all land on it)
+  // broken ladders stop short: you fall through the missing lower rungs
+  for (const l of ladders) {
+    l.effBottom = l.broken ? l.yBottom - (l.yBottom - l.yTop) * 0.42 : l.yBottom;
+  }
+  buildStatic();
+}
+
+/** Girder a rolling body should sit on at x (nearest surface below y). */
+function surfaceBelow(x, y, maxDrop, skip) {
+  let best = null;
+  const all = girders.concat([platform]);
+  for (const g of all) {
+    if (skip && g === skip) continue;
+    if (x < g.x1 - 1 || x > g.x2 + 1) continue;
+    const sy = g.yAt(x);
+    if (sy >= y - 2 && sy <= y + maxDrop) {
+      if (!best || sy < best.y) best = { g, y: sy };
+    }
+  }
+  return best;
+}
+function laddersNear(x, r) {
+  const out = [];
+  for (const l of ladders) if (Math.abs(l.x - x) <= r) out.push(l);
+  return out;
+}
+
+/* ============================================================
+   SPRITES (string pixel-art; '.' = transparent)
+   ============================================================ */
+// Only the letters actually used by the sprite grids below are mapped.
+const PAL = {
+  R: COL.hatRed, S: COL.skin, O: COL.overall, B: COL.boot, H: COL.hair,
+  W: COL.white, P: COL.pauline, p: COL.paulineDk,
+  J: COL.drum, j: COL.drumDk,
+};
+
+function drawSprite(rows, ox, oy, flip, scale) {
+  const s = scale || 1;
+  for (let y = 0; y < rows.length; y++) {
+    const row = rows[y];
+    for (let x = 0; x < row.length; x++) {
+      const c = row[x];
+      if (c === '.' || c === ' ') continue;
+      const col = PAL[c];
+      if (!col) continue;
+      rect(ox + (flip ? (row.length - 1 - x) : x) * s, oy + y * s, s, s, col);
+    }
+  }
+}
+/* --- Jumpman --- */
+const SM_STAND = [
+  '...RRRRRR...',
+  '..RRRRRRRR..',
+  '..RRHHSSSR..',
+  '..SSSWSSSR..',
+  '..SSSSSSS...',
+  '...OOOOOO...',
+  '..OOOOOOOO..',
+  '.SOOOOOOOOS.',
+  '.SOOOOOOOOS.',
+  '.SOOOOOOOOS.',
+  '..OOOOOOOO..',
+  '...OO..OO...',
+  '...BB..BB...',
+  '..BBB..BBB..',
+];
+const SM_RUN1 = [
+  '...RRRRRR...',
+  '..RRRRRRRR..',
+  '..RRHHSSSR..',
+  '..SSSWSSSR..',
+  '..SSSSSSS...',
+  '...OOOOOO...',
+  '..OOOOOOOO..',
+  '.SOOOOOOOOS.',
+  '..OOOOOOOO..',
+  '..OOOOOOOO..',
+  '..OO....OO..',
+  '.BBB....BB..',
+  '.BB......BB.',
+  '............',
+];
+const SM_RUN2 = [
+  '...RRRRRR...',
+  '..RRRRRRRR..',
+  '..RRHHSSSR..',
+  '..SSSWSSSR..',
+  '..SSSSSSS...',
+  '...OOOOOO...',
+  '..OOOOOOOO..',
+  '.SOOOOOOOOS.',
+  '.SOOOOOOOOS.',
+  '..OOOOOOOO..',
+  '...OOOOOO...',
+  '....OOOO....',
+  '...BB..BB...',
+  '..BB....BB..',
+];
+const SM_JUMP = [
+  '...RRRRRR..S',
+  '..RRRRRRRR.S',
+  '..RRHHSSSRS.',
+  '..SSSWSSSS..',
+  '..SSSSSSS...',
+  '.S.OOOOOO...',
+  'SSOOOOOOOO..',
+  '.SOOOOOOOO..',
+  '..OOOOOOOO..',
+  '..OOOOOOOO..',
+  '..OOO..OOO..',
+  '..BB....BB..',
+  '.BBB....BBB.',
+  '............',
+];
+const SM_CLIMB1 = [
+  '....RRRR....',
+  '...RRRRRR...',
+  '..SRRHHSSR..',
+  '..SSSWSSSR..',
+  '...SSSSSS...',
+  '...OOOOOO...',
+  '..S.OOOOO...',
+  '..S.OOOOO...',
+  '....OOOO....',
+  '....OOOO....',
+  '....OO.OO...',
+  '....BB.BB...',
+  '...BBB.BBB..',
+  '............',
+];
+const SM_CLIMB2 = [
+  '............',
+  '....RRRR....',
+  '...RRRRRR...',
+  '..RRHHSSSR..',
+  '..SSSWSSSR.S',
+  '...SSSSSS.S.',
+  '...OOOOOOS..',
+  '....OOOOO...',
+  '....OOOO....',
+  '....OOOO....',
+  '....OO.OO...',
+  '....BB.BB...',
+  '...BBB.BBB..',
+  '............',
+];
+const SM_HAMMER = [
+  '...RRRRRR...',
+  '..RRRRRRRR..',
+  '..RRHHSSSR..',
+  '..SSSWSSSR..',
+  '..SSSSSSS.SS',
+  '...OOOOOO.SS',
+  '..OOOOOOOO..',
+  '.SOOOOOOOO..',
+  '.SOOOOOOO...',
+  '..OOOOOOO...',
+  '...OO..OO...',
+  '...BB..BB...',
+  '..BBB..BBB..',
+  '............',
+];
+const SM_HURT = [
+  '..S.RRRRR.S.',
+  '..SRRRRRRRS.',
+  '...RHHSSSR..',
+  '...SS.SSS...',
+  '...SSSSSS...',
+  '..SOOOOOOS..',
+  '..SOOOOOOS..',
+  '...OOOOOO...',
+  '...OOOOOO...',
+  '...OOOOOO...',
+  '....OOOO....',
+  '...BB..BB...',
+  '..BB....BB..',
+  '............',
+];
+const SM_FALL = SM_RUN2;
+
+/* --- Pauline --- */
+const SP_PAULINE = [
+  '...HHHH...',
+  '..HHHHHH..',
+  '..HSSSSH..',
+  '..HSWSSH..',
+  '...SSSS...',
+  '..PPPPPP..',
+  '..PPPPPP..',
+  '.PPPPPPPP.',
+  '.PPPPPPPP.',
+  '..PPPPPP..',
+  '..PP..PP..',
+  '..pp..pp..',
+  '.ppp..ppp.',
+];
+/* --- Oil drum (blue) with fire on top --- */
+const SP_DRUM = [
+  '.JJJJJJJJ.',
+  'JJJJJJJJJJ',
+  'JjjJJJJjjJ',
+  'JJJJJJJJJJ',
+  'JJJJJJJJJJ',
+  'JjjJJJJjjJ',
+  'JJJJJJJJJJ',
+  'JJJJJJJJJJ',
+  'JjjJJJJjjJ',
+  'JJJJJJJJJJ',
+];
+
+/* ============================================================
+   DRAW: world
+   ============================================================ */
+function drawBackdrop() {
+  // the arcade stage is pure black
+  rect(0, 0, VW, VH, COL.black);
+}
+
+// Arcade girder: bright pink top/bottom chords with an open diagonal truss
+// between them, black showing through. Drawn as short axis-aligned steps,
+// which is plenty accurate at the shallow slopes the level uses.
+// Slim, vertically symmetric girder: identical bright chords top and bottom,
+// with an open web of black diamonds centred on the mid-line.
+const GIRDER_H = 20, GIRDER_TOP = 5, GIRDER_BOT = 5;
+
+function drawGirder(g) {
+  const H = GIRDER_H, CHORD = GIRDER_TOP, ih = H - CHORD - GIRDER_BOT;
+  const dx = g.x2 - g.x1, dy = g.y2 - g.y1;
+  const len = Math.hypot(dx, dy);
+  const steps = Math.max(1, Math.round(len / 8));
+  const X = i => g.x1 + dx * (i / steps);
+  const Y = i => g.y1 + dy * (i / steps);
+  const HALF = 7;
+
+  // solid beam
+  for (let i = 0; i <= steps; i++) {
+    const x = X(i), y = Y(i);
+    rect(x - HALF, y, HALF * 2 + 1, H, COL.girder);
+  }
+  // chords: mirrored, so the underside mirrors the top edge
+  for (let i = 0; i <= steps; i++) {
+    const x = X(i), y = Y(i);
+    rect(x - HALF, y, HALF * 2 + 1, CHORD, COL.girderLite);
+    rect(x - HALF, y + CHORD, HALF * 2 + 1, 1, COL.girder);
+    rect(x - HALF, y + H - CHORD - 1, HALF * 2 + 1, 1, COL.girder);
+    rect(x - HALF, y + H - CHORD, HALF * 2 + 1, CHORD, COL.girderLite);
+  }
+  // One black ◇ per cell, centred on the girder mid-line so the pattern is
+  // symmetric about it. Drawn as vertical slices: at horizontal offset u
+  // (−0.5..0.5 across the cell) the black web is ih*(1−2|u|) tall.
+  const n = Math.max(1, Math.round(len / (HALF * 2 + 2)));
+  for (let i = 0; i < n; i++) {
+    const ax = g.x1 + dx * (i / n), bx = g.x1 + dx * ((i + 1) / n);
+    const ay = g.y1 + dy * (i / n), by = g.y1 + dy * ((i + 1) / n);
+    const cellW = bx - ax;
+    if (cellW < 3) continue;
+    const cols = Math.max(2, Math.round(cellW) - 2);
+    const w = (cellW - 2) / cols;
+    for (let k = 0; k < cols; k++) {
+      const u = (k + 0.5) / cols - 0.5;                 // −0.5 .. 0.5
+      const depth = ih * 0.72 * (1 - 2 * Math.abs(u));
+      if (depth < 1) continue;
+      const x = ax + 1 + (cellW - 2) * (k / cols);
+      const yMid = ay + (by - ay) * ((k + 0.5) / cols) + CHORD + ih / 2;
+      rect(x, yMid - depth / 2, w + 0.6, depth, COL.girderHole);
+    }
+  }
+}
+
+function drawLadder(l) {
+  const w = 22, rail = 3;
+  const yb = l.broken ? l.effBottom : l.yBottom;
+  const h = yb - l.yTop;
+  const c = l.broken ? COL.broken : COL.ladder;
+  const cd = l.broken ? COL.broken : COL.ladderDark;
+  rect(l.x - w / 2, l.yTop, rail, h, c);
+  rect(l.x + w / 2 - rail, l.yTop, rail, h, c);
+  rect(l.x - w / 2 + rail, l.yTop, 1, h, cd);
+  rect(l.x + w / 2 - rail - 1, l.yTop, 1, h, cd);
+  for (let y = l.yTop + 5; y < yb - 2; y += 9) {
+    rect(l.x - w / 2, y, w, 3, c);
+    rect(l.x - w / 2, y + 3, w, 1, cd);
+  }
+  if (l.broken) {   // splintered ends
+    rect(l.x - w / 2 - 1, yb - 3, 4, 5, c);
+    rect(l.x + w / 2 - 2, yb - 5, 4, 4, c);
+  }
+}
+
+// Build the level now that the draw helpers buildStatic() needs exist.
+buildLevel();
+
+/* ============================================================
+   GAME STATE
+   ============================================================ */
+const SPR_SCALE = 2;              // player and Pauline are drawn at 2x
+const BARREL_RATE = 3;            // barrel spawn intervals are multiplied by this
+const BARREL_SCALE = 1.25;        // barrels are drawn and collide 25% larger
+const BARREL_W = 12 * BARREL_SCALE, BARREL_H = 11 * BARREL_SCALE;
+const HAMMER_SWING = 4, HAMMER_REST = 7;    // auto-swing on / off frames
+const PW = 10 * SPR_SCALE, PH = 12 * SPR_SCALE;          // player hitbox
+const GRAV = 0.1, JUMP_V = -2.5, WALK = 1.55, CLIMB = 1.0;
+
+const G = {
+  mode: 'title',           // title | ready | play | dying | complete | gameover | win
+  modeT: 0,
+  score: 0, bonus: 5000, level: 1, lives: 3,
+  t: 0, shake: 0,
+  player: null, kong: null,
+  barrels: [], fireballs: [], hammers: [], items: [], floats: [], parts: [],
+  spawnT: 0, fireT: 0,
+  difficulty: 1,
+  hitFlash: 0,
+  hi: (function () { try { return parseInt(localStorage.getItem('kong.hi') || '0', 10) || 0; } catch (e) { return 0; } })(),
+};
+function saveHi() {
+  if (G.score > G.hi) { G.hi = G.score; try { localStorage.setItem('kong.hi', String(G.hi)); } catch (e) {} }
+}
+
+function newPlayer() {
+  return {
+    x: 78, y: girders[0].yAt(78) - PH, vx: 0, vy: 0,
+    onGround: true, climbing: null,
+    face: 1, anim: 0, hammer: null, hammerT: 0, swing: 0, swingWait: 0,
+    invuln: 0, dead: false,
+  };
+}
+
+function resetLevel(full) {
+  G.player = newPlayer();
+  G.barrels = []; G.fireballs = []; G.items = []; G.parts = []; G.floats = [];
+  G.spawnT = 90; G.fireT = 260;
+  G.kong = { x: 60, y: girders[5].yAt(60) - 30, face: 1, anim: 0, throwT: 120, state: 'idle', armT: 0, rage: 0 };
+  G.hammers = [
+    { x: 70, y: girders[4].yAt(70) - 12, taken: false },
+    { x: 350, y: girders[1].yAt(350) - 12, taken: false },
+  ];
+  G.bonus = 5000;
+  if (full) { G.score = 0; G.lives = 3; G.level = 1; G.difficulty = 1; }
+}
+resetLevel(true);
+
+function addFloat(x, y, text, col) {
+  G.floats.push({ x, y, text, col: col || COL.white, life: 60 });
+}
+function addScore(n, x, y, label) {
+  G.score += n;
+  if (x != null) addFloat(x, y, (label || '') + n, COL.clear);
+  SFX.points();
+}
+function burst(x, y, col, n, spd) {
+  for (let i = 0; i < (n || 12); i++) {
+    const a = Math.random() * Math.PI * 2, s = (Math.random() * (spd || 2.4)) + 0.6;
+    G.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 1, life: 24 + Math.random() * 22, col });
+  }
+}
+
+/* ---------- barrels ---------- */
+function spawnBarrel() {
+  const g = girders[5];
+  G.barrels.push({
+    x: g.x1 + 40, y: g.yAt(g.x1 + 40) - BARREL_H, vx: 1.15 + 0.12 * G.difficulty, vy: 0,
+    roll: g.roll, onGround: true, dead: false, spin: 0, fromFire: false,
+  });
+  SFX.throw();
+}
+function spawnFireball(fromBarrel) {
+  if (G.fireballs.length >= 3) return;
+  G.fireballs.push({
+    x: DRUM.x + 4, y: DRUM.y + 16, vx: 0.8 + 0.1 * G.difficulty, vy: 0,
+    dir: 1, climbDir: -1, anim: 0, climbTarget: null, waitT: 0, dead: false,
+  });
+  burst(DRUM.x, DRUM.y + 10, COL.fire2, fromBarrel ? 14 : 8, 2.2);
+  SFX.fireball();
+}
+
+function barrelStep(b) {
+  if (!b.onGround) {
+    b.vy += GRAV * 0.85; b.y += b.vy; b.x += b.vx * 0.75; b.spin += 0.25;
+    // dropFrom: the girder the barrel tumbled off. It must be ignored, otherwise
+    // the barrel re-lands on it on the very next frame and never follows through.
+    const s = surfaceBelow(b.x, b.y, 400, b.dropFrom);
+    const floorY = s ? s.y - BARREL_H : null;
+    if (floorY != null && b.y >= floorY) {
+      b.y = floorY;
+      b.vy = 0;
+      b.onGround = true;
+      b.dropFrom = null;
+      b.roll = s.g.roll;
+    }
+    return;
+  }
+  // Always maintain forward momentum - barrel should roll all the way to the bottom
+  const speed = (b.fromFire ? 1.5 : 1.1) + 0.12 * G.difficulty;
+  b.x += speed * b.roll;
+  b.spin += 0.22 * b.roll;
+  const s = surfaceBelow(b.x, b.y - 2, 26);
+  if (!s) {                       // nothing under the barrel -> it falls off the edge
+    b.onGround = false;
+    b.vy = 0;
+    b.vx = b.roll * 1.1;          // keep rolling in the same direction while falling
+    b.dropFrom = null;
+    return;
+  }
+  b.y = s.y - BARREL_H;
+  b.roll = s.g.roll;
+  if (Math.random() < 0.014) {    // occasionally tumble down a ladder
+    // Only ladders that start at this girder and come down — dropping off the
+    // foot of a ladder would take the barrel out of the level.
+    const l = ladders.find(l => Math.abs(l.x - b.x) <= 8 && Math.abs((b.y + BARREL_H) - l.yTop) < 10);
+    if (l) {
+      b.onGround = false;
+      b.vy = 0;
+      b.vx = 0;
+      b.x = l.x;
+      b.dropFrom = s.g;           // ignore the girder it is leaving
+    }
+  }
+  // rolling into the oil drum ignites it
+  if (Math.abs(b.x + BARREL_W / 2 - DRUM.x) < 16 && b.y + BARREL_H > DRUM.y) {
+    b.dead = true;
+    burst(DRUM.x, DRUM.y + 8, COL.fire2, 16, 3);
+    spawnFireball(true);
+    return;
+  }
+  // Remove barrels that go too far off screen
+  if (b.x < -30 || b.x > VW + 30 || b.y > VH + 40) b.dead = true;
+}
+
+function fireballStep(f) {
+  f.anim += 0.2;
+  if (f.waitT > 0) { f.waitT--; return; }
+  if (f.climbTarget) {
+    const l = f.climbTarget;
+    f.x = l.x;
+    f.y += 1.0 * f.climbDir;              // climbDir -1 = up, +1 = down
+    const done = (f.climbDir < 0 && f.y <= l.yTop - 8) || (f.climbDir > 0 && f.y >= l.yBottom - 10);
+    // a broken ladder ends early — clamp to the lowest intact rung so the
+    // fireball never stops in mid-air or falls through the missing rungs
+    if (done || (l.broken && f.y >= l.effBottom - 10)) {
+      f.climbTarget = null;
+      if (l.broken) f.y = Math.min(f.y, l.effBottom - 10);
+      const s = surfaceBelow(f.x, f.y - 2, 300);
+      if (s) f.y = s.y - 10; else { f.dead = true; return; }
+      f.waitT = 18;
+    }
+    return;
+  }
+  f.x += f.vx * f.dir;
+  const s = surfaceBelow(f.x, f.y - 2, 24);
+  if (!s) {
+    const drop = surfaceBelow(f.x, f.y - 4, 300);
+    if (drop) { f.y = drop.y - 10; } else { f.dead = true; return; }
+  } else {
+    f.y = s.y - 10;
+    if (Math.random() < 0.014) {          // sometimes chase Jumpman up/down a ladder
+      for (const l of laddersNear(f.x, 9)) {
+        if (Math.abs(f.y - (l.yTop - 10)) < 14) { f.climbTarget = l; f.climbDir = 1; break; }   // at top -> go down
+        if (Math.abs(f.y - (l.yBottom - 10)) < 14) { f.climbTarget = l; f.climbDir = -1; break; } // at bottom -> go up
+      }
+    }
+  }
+  if (f.x < -20 || f.x > VW + 20 || f.y > VH + 30) f.dead = true;
+}
+
+/* ============================================================
+   PLAYER
+   ============================================================ */
+function playerHit(p) { return { x: p.x - PW / 2, y: p.y, w: PW, h: PH }; }
+function overlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function tryPickup(p) {
+  for (const h of G.hammers) {
+    if (h.taken) continue;
+    if (Math.abs(h.x - p.x) < 14 && Math.abs(h.y - (p.y + PH / 2)) < 18) {
+      h.taken = true;                            // removed from the level for good
+      p.hammer = h; p.hammerT = 420;
+      SFX.grab();
+      addFloat(p.x, p.y - 8, 'HAMMER!', COL.fire1);
+      return;
+    }
+  }
+  for (const it of G.items) {
+    if (it.dead) continue;
+    if (Math.abs(it.x - p.x) < 14 && Math.abs(it.y - (p.y + PH / 2)) < 16) {
+      it.dead = true;
+      addScore(it.val, it.x, it.y - 10, '');
+      burst(it.x, it.y, COL.fire1, 10, 2);
+    }
+  }
+}
+
+/* ---- hammer swing animation -------------------------------------------------
+   The hammer turns on an arc around the player's shoulder: it winds up behind
+   the head, snaps down with an accelerating stroke, follows through in front,
+   then drifts back up. Angles are in radians, measured against the facing
+   direction (+x = where the player looks); the world angle is mirrored by face.
+   -------------------------------------------------------------------------- */
+const HAM_PIV_Y = 0.34;                       // shoulder height inside the box
+const HAM_LEN = 19;                           // handle length, virtual px
+const HAM_ANG = {
+  rest:   0.30,                               // carried out in front
+  wind:  -2.35,                               // raised behind the head
+  smash:  0.72,                               // bottom of the stroke
+  follow: 0.02,                               // ricochets back up after impact
+};
+
+// Slow wind-up, then the head snaps down into the impact.
+function strokeEase(u) { return u * u * (0.65 + 0.35 * u); }
+
+function hammerPose(p) {
+  let ang = HAM_ANG.rest, u = 0;
+  if (p.hammer) {
+    if (p.swing > 0) {
+      u = (HAMMER_SWING - p.swing + 1) / HAMMER_SWING;  // 0.25 .. 1 across the stroke
+      ang = HAM_ANG.wind + (HAM_ANG.smash - HAM_ANG.wind) * strokeEase(u);
+    } else {
+      const r = 1 - p.swingWait / HAMMER_REST;  // 0 .. ~1 through the recovery
+      if (r < 0.2) {                            // ricochet back up out of the impact
+        const k = r / 0.2;
+        ang = HAM_ANG.smash + (HAM_ANG.follow - HAM_ANG.smash) * (k * (2 - k));
+      } else if (r < 0.55) {                    // settle down at the side
+        const k = (r - 0.2) / 0.35;
+        ang = HAM_ANG.follow + (HAM_ANG.rest - HAM_ANG.follow) * (k * k * (3 - 2 * k));
+      } else {                                  // wind back up behind the head
+        const k = Math.min(1, (r - 0.55) / 0.45);
+        ang = HAM_ANG.rest + (HAM_ANG.wind - HAM_ANG.rest) * (k * k * (3 - 2 * k));
+      }
+      ang += Math.sin(G.t * 7) * 0.04;          // idle breathing
+    }
+  }
+  const wa = p.face > 0 ? ang : Math.PI - ang;
+  const pv = { x: p.x + p.face * 3, y: p.y + PH * HAM_PIV_Y };
+  return {
+    ang, wa, u, pv,
+    x: pv.x + Math.cos(wa) * HAM_LEN,
+    y: pv.y + Math.sin(wa) * HAM_LEN,
+  };
+}
+
+function swingHit(p) {
+  if (!p.hammer || p.swing <= 0) return null;
+  // Only the descending half of the stroke can smash something, so the wind-up
+  // raised behind the head never hits what is above the player.
+  const h = hammerPose(p);
+  if (h.u < 0.7) return null;
+  const pad = 11;
+  return { x: h.x - pad, y: h.y - pad, w: pad * 2, h: pad * 2 };
+}
+
+function killBarrel(b, byHammer) {
+  b.dead = true;
+  addScore(byHammer ? 300 : 100, b.x, b.y, '');
+  burst(b.x + BARREL_W / 2, b.y + BARREL_H / 2, COL.barrel, 14, 2.6);
+  if (byHammer) {
+    SFX.hammer();
+    if (Math.random() < 0.3) {
+      G.items.push({ x: b.x + 6, y: b.y + 6, val: 500, kind: Math.random() < 0.5 ? 'purse' : 'star', life: 480, dead: false });
+    }
+  } else {
+    SFX.stomp();
+  }
+  G.shake = Math.max(G.shake, byHammer ? 5 : 3);
+}
+
+function updatePlayer(p) {
+  const left = keys.left || touchL, right = keys.right || touchR, jump = pressed.jump;
+  const up = keys.up, down = keys.down;
+
+  if (p.invuln > 0) p.invuln--;
+  if (p.hammer) {
+    p.hammerT--;
+    if (p.hammerT <= 0) { p.hammer = null; p.swing = 0; p.swingWait = 0; addFloat(p.x, p.y - 6, 'GONE', COL.white); }
+  }
+  // A picked-up hammer swings on its own: no button press is needed.
+  if (p.hammer) {
+    if (p.swing > 0) p.swing--;
+    else if (p.swingWait > 0) p.swingWait--;
+    else { p.swing = HAMMER_SWING; p.swingWait = HAMMER_REST; SFX.hammer(); }
+  } else if (p.swing > 0) p.swing--;
+
+  /* ---- climbing ---- */
+  if (p.climbing) {
+    const l = p.climbing;
+    p.x += (l.x - p.x) * 0.4;
+    p.vx = 0; p.vy = 0;
+    let moved = false;
+    if (up) { p.y -= CLIMB; moved = true; }
+    if (down) { p.y += CLIMB; moved = true; }
+    if (moved) { p.anim += 0.16; if ((p.anim | 0) % 7 === 0) SFX.climb(); }
+    if (p.y + PH <= l.yTop + 1) {                 // topped out -> stand on the girder above
+      p.climbing = null; p.y = l.yTop - PH; p.onGround = true;
+    } else if (p.y + PH >= l.effBottom) {         // reached the bottom rung
+      p.climbing = null;
+      const s = surfaceBelow(p.x, l.effBottom - 4, 24);
+      p.y = (s ? s.y : l.effBottom) - PH;
+      p.onGround = true;
+    }
+    if (jump) { p.climbing = null; p.vy = JUMP_V * 0.8; p.onGround = false; SFX.jump(); }
+    return;
+  }
+
+  /* ---- grab a ladder ---- */
+  if (up) {
+    for (const l of laddersNear(p.x, 9)) {
+      if (!l.broken && p.y + PH >= l.yBottom - 10 && p.y + PH <= l.yBottom + 4) {
+        // grab at the foot and climb up — no teleport to the top
+        p.climbing = l; p.x = l.x; p.y = l.yBottom - PH; p.vy = 0; return;
+      }
+    }
+  }
+  if (down) {
+    for (const l of laddersNear(p.x, 9)) {
+      if (Math.abs((p.y + PH) - l.yTop) < 9) {
+        p.climbing = l; p.x = l.x; p.y = l.yTop + 2; p.vy = 0; return;
+      }
+    }
+  }
+
+  /* ---- horizontal ---- */
+  let sp = WALK * (p.hammer ? 0.78 : 1);
+  if (left && !right) { p.vx = -sp; p.face = -1; }
+  else if (right && !left) { p.vx = sp; p.face = 1; }
+  else p.vx = 0;
+  // The hammer swings by itself, so the jump button always jumps.
+  if (jump && p.onGround) {
+    p.vy = JUMP_V * (p.hammer ? 0.9 : 1);
+    p.onGround = false;
+    SFX.jump();
+  }
+
+  p.x += p.vx;
+  if (p.x < 8) p.x = 8;
+  if (p.x > VW - 8) p.x = VW - 8;
+  if (p.vx !== 0 && p.onGround) p.anim += 0.22;
+
+  /* ---- gravity + vertical collision ---- */
+  p.vy += GRAV;
+  if (p.vy > 12) p.vy = 12;
+  const prevFeet = p.y + PH;
+  p.y += p.vy;
+  p.onGround = false;
+
+  if (p.vy >= 0) {
+    const s = surfaceBelow(p.x, prevFeet - 3, p.vy + 6);
+    if (s && (p.y + PH) >= s.y) {
+      p.y = s.y - PH; p.vy = 0; p.onGround = true;
+    }
+  }
+  // No ceiling collision: a jump is never cut short by the girder above, so the
+  // full arc always plays out. The girder spacing is still wider than the jump
+  // height, so no level can be skipped by jumping.
+
+  if (p.y > VH + 40) return kill('fell');
+
+  tryPickup(p);
+}
+
+/* ============================================================
+   KONG
+   ============================================================ */
+function updateKong(k) {
+  k.anim += 0.05;
+  if (k.armT > 0) k.armT--;
+  if (G.mode !== 'play') return;
+  k.throwT--;
+  if (k.throwT <= 0) {
+    k.armT = 26;
+    spawnBarrel();
+    const base = Math.max(52, 130 - G.level * 12 - (5000 - G.bonus) / 100);
+    k.throwT = (base + Math.random() * 60) * BARREL_RATE;
+  }
+  // face the player
+  k.face = G.player.x < k.x ? -1 : 1;
+}
+
+/* ============================================================
+   COLLISIONS / DEATH
+   ============================================================ */
+function kill(reason) {
+  if (G.mode !== 'play') return;
+  G.mode = 'dying'; G.modeT = 0;
+  G.player.dead = true; G.player.climbing = null;
+  G.player.hammer = null;
+  G.player.vy = reason === 'fell' ? 2 : -5.5;
+  G.shake = 9; G.hitFlash = 14;
+  SFX.death();
+  burst(G.player.x, G.player.y + 7, COL.hatRed, 18, 3);
+}
+
+function checkHits() {
+  const p = G.player;
+  if (G.mode !== 'play' || p.invuln > 0) return;
+  const pb = playerHit(p);
+  const hb = p.swing > 0 ? swingHit(p) : null;
+
+  for (const b of G.barrels) {
+    if (b.dead) continue;
+    const bb = { x: b.x, y: b.y, w: BARREL_W, h: BARREL_H };
+    if (hb && overlap(hb, bb)) { killBarrel(b, true); continue; }
+    if (overlap(pb, bb)) {
+      // hop-over grace: only die if the body really overlaps the barrel core
+      if (p.y + PH > b.y + 4 * BARREL_SCALE && p.y < b.y + BARREL_H - 2 * BARREL_SCALE) return kill('barrel');
+    }
+  }
+  for (const f of G.fireballs) {
+    if (f.dead) continue;
+    const fb = { x: f.x, y: f.y, w: 12, h: 10 };
+    if (hb && overlap(hb, fb)) {
+      f.dead = true; addScore(500, f.x, f.y, '');
+      burst(f.x + 6, f.y + 5, COL.fire2, 18, 3); SFX.hammer();
+      G.shake = 6;
+      continue;
+    }
+    if (overlap(pb, fb)) return kill('fire');
+  }
+  // Kong himself
+  const kb = { x: k_box().x, y: k_box().y, w: k_box().w, h: k_box().h };
+  if (overlap(pb, kb)) {
+    if (hb && overlap(hb, kb)) { G.kong.rage = 40; G.shake = 7; G.kong.throwT = Math.max(20, G.kong.throwT - 40); }
+    else return kill('kong');
+  }
+}
+function k_box() { const k = G.kong; return { x: k.x - 16, y: k.y, w: 32, h: 30 }; }
+
+/* ============================================================
+   DRAW: entities
+   ============================================================ */
+function drawPlayer(p) {
+  if (p.invuln > 0 && (Math.floor(G.t * 20) % 2 === 0)) return;
+  // The arm-raised sprite only fits the wind-up; during the down-stroke the
+  // arm belongs down by the hammer, so use the ordinary pose instead.
+  const winding = p.hammer && p.swing > 0 && hammerPose(p).u < 0.6;
+  let rows = SM_STAND, flip = p.face < 0;
+  if (p.dead) rows = SM_HURT;
+  else if (p.climbing) rows = (Math.floor(p.anim * 3) % 2) ? SM_CLIMB1 : SM_CLIMB2;
+  else if (!p.onGround) rows = (p.vy < 0) ? SM_JUMP : SM_FALL;
+  else if (winding) rows = SM_HAMMER;
+  else if (p.vx !== 0) rows = (Math.floor(p.anim) % 2) ? SM_RUN1 : SM_RUN2;
+  else rows = SM_STAND;
+
+  const ox = Math.round(p.x - 6 * SPR_SCALE), oy = Math.round(p.y);
+  drawSprite(rows, ox, oy, flip, SPR_SCALE);
+
+  // hammer — drawn at the same size as the pickup, so picking it up does not
+  // change how big it looks. It swings on its own while it is held.
+  if (p.hammer) {
+    const h = hammerPose(p);
+    // Motion streak: a tapered arc of light behind the head, widest just after
+    // the impact and thinning back towards the start of the stroke.
+    if (p.swing > 0) {
+      for (let i = 1; i <= 7; i++) {
+        const uu = Math.max(0, h.u - i * 0.095);
+        const a = HAM_ANG.wind + (HAM_ANG.smash - HAM_ANG.wind) * strokeEase(uu);
+        const tx = h.pv.x + Math.cos(p.face > 0 ? a : Math.PI - a) * (HAM_LEN - 2);
+        const ty = h.pv.y + Math.sin(a) * (HAM_LEN - 2);
+        const k = 1 - i / 8;
+        const al = 0.34 * k * k;
+        if (al <= 0.015) continue;
+        rotRect(tx, ty, 10 * k + 2, 3 * k + 1, p.face > 0 ? a : Math.PI - a, [255, 248, 222, al]);
+      }
+    } else if (p.swingWait > 0) {
+      const r = 1 - p.swingWait / HAMMER_REST;
+      if (r < 0.3) {  // dust puff kicked up by the impact
+        const k = r / 0.3;
+        const al = 0.42 * (1 - k);
+        for (let i = -2; i <= 2; i++) {
+          if (!i) continue;
+          const d = (2 + k * 13) * (i < 0 ? -1 : 1);
+          rect(h.x + d - 1, h.y + 2 + k * 3, 3 - k, 3 - k, [214, 200, 170, al]);
+        }
+      }
+    }
+    // handle from the shoulder pivot to the head
+    const mx = (h.pv.x + h.x) / 2, my = (h.pv.y + h.y) / 2;
+    rotRect(mx, my, HAM_LEN, 3, h.wa, COL.hammerDk);
+    rotRect(mx, my - 0.6, HAM_LEN - 2, 1, h.wa, [196, 158, 96]);
+    // head of the hammer, square to the swing
+    const ha = h.wa + Math.PI / 2;
+    rotRect(h.x, h.y, 15, 9, ha, COL.hammer);
+    rotRect(h.x, h.y, 15, 2.4, ha, COL.white);
+    rotRect(h.x, h.y, 2, 9, ha, COL.white);
+    rotRect(h.x, h.y + 3.2, 15, 1.2, ha, COL.hammerDk);
+    // white spark at the bottom of the stroke
+    if (p.swing > 0 && h.u > 0.82) {
+      const al = 0.85 - (h.u - 0.82) * 3;
+      for (let i = 0; i < 5; i++) {
+        const a = -Math.PI / 2 + (i - 2) * 0.55;
+        const d = 9 + (h.u - 0.82) * 26;
+        rect(h.x + Math.cos(a) * d, h.y + Math.abs(Math.sin(a)) * d * 0.5, 2, 2, [255, 255, 255, Math.max(0, al)]);
+      }
+    }
+  }
+}
+
+// The stack of spare barrels Kong throws from, beside him on his girder.
+function drawBarrelStack(k) {
+  const dir = k.face >= 0 ? 1 : -1;
+  const base = k.y + 30;                       // girder surface under Kong
+  const one = (cx, cy) => drawBarrelShape(cx, cy, 0, 0, BARREL_SCALE);
+  one(k.x + dir * 34, base - 7);
+  one(k.x + dir * 49, base - 7);
+  one(k.x + dir * 41, base - 22);
+}
+
+// Filled circle built from 1px spans — used for Kong's round ears.
+function disc(cx, cy, r, col) {
+  for (let dy = -r; dy <= r; dy++) {
+    const w = Math.sqrt(r * r - dy * dy);
+    rect(cx - w, cy + dy, w * 2 + 1, 1, col);
+  }
+}
+
+function drawKong(k) {
+  const bob = Math.sin(k.anim * 2) * 1.5;
+  const x = Math.round(k.x), y = Math.round(k.y + bob);
+  const f = k.face;
+  const rage = k.rage > 0;
+  const fur  = rage ? [196, 66, 38] : COL.kong;
+  const furD = rage ? [140, 36, 20] : COL.kongDark;
+  const skin = COL.kongFace;
+  const armUp = k.armT > 0;
+
+  // ---- legs & feet ----
+  rect(x - 15, y + 18, 11, 12, furD);
+  rect(x + 4,  y + 18, 11, 12, furD);
+  rect(x - 18, y + 28, 15, 4, furD);
+  rect(x + 3,  y + 28, 15, 4, furD);
+  // ---- torso ----
+  rect(x - 17, y + 2, 34, 18, fur);
+  rect(x - 11, y + 5, 22, 13, skin);      // chest
+  rect(x - 11, y + 5, 22, 2, furD);
+  // ---- arms ----
+  if (armUp) {
+    rect(x - 26, y - 16, 9, 24, furD);
+    rect(x + 17, y - 16, 9, 24, furD);
+    rect(x - 27, y - 20, 11, 7, fur);
+    rect(x + 16, y - 20, 11, 7, fur);
+  } else {
+    rect(x - 25, y + 2, 9, 22, furD);
+    rect(x + 16, y + 2, 9, 22, furD);
+    rect(x - 26, y + 20, 11, 7, fur);      // fists
+    rect(x + 15, y + 20, 11, 7, fur);
+  }
+  // ---- ears ---- round, drawn behind the skull so they read as discs on
+  // either side of the head. Twice the size of the old square tufts.
+  const EAR_R = 6, EAR_INNER = 3.5;
+  for (const sgn of [-1, 1]) {
+    const ex = x + sgn * 12, ey = y - 19;
+    disc(ex, ey, EAR_R, furD);
+    disc(ex, ey, EAR_R - 1, fur);
+    disc(ex, ey, EAR_INNER, skin);
+  }
+  // ---- head ----
+  rect(x - 15, y - 18, 30, 22, fur);       // skull
+  rect(x - 12, y - 8, 24, 12, skin);       // muzzle
+  rect(x - 12, y - 8, 24, 2, furD);
+  // heavy brow
+  rect(x - 13, y - 14, 26, 4, furD);
+  // eyes
+  rect(x - 9 + f, y - 12, 5, 5, COL.white);
+  rect(x + 4 + f,  y - 12, 5, 5, COL.white);
+  rect(x - 8 + f * 2, y - 11, 3, 3, COL.black);
+  rect(x + 5 + f * 2, y - 11, 3, 3, COL.black);
+  // nostrils + grin
+  rect(x - 6, y - 2, 3, 2, furD);
+  rect(x + 3,  y - 2, 3, 2, furD);
+  rect(x - 8, y + 1, 16, 2, furD);
+  if (rage) { rect(x - 8, y + 1, 16, 3, COL.white); }
+  if (rage) rect(x + 15, y - 22, 3, 6, [130, 210, 255]);
+  // barrel being thrown
+  if (armUp) drawBarrelShape(x + f * 24, y - 26, 0, 0, BARREL_SCALE);
+}
+
+function drawBarrelShape(cx, cy, spin, rollDir, scale) {
+  const s = scale || 1;
+  const w = 12 * s, h = 11 * s;
+  // When rolling, render from side view
+  if (Math.abs(rollDir) > 0.5) {
+    // Side view - draw the barrel as a rounded rectangle
+    // Main barrel body
+    rect(cx - w / 2, cy - h / 2, w, h, [188, 120, 52]);
+    // Top highlight (curved effect)
+    rect(cx - w / 2 + s, cy - h / 2 + 2 * s, w - 2 * s, 5 * s, COL.barrelLt);
+    // Bottom shadow
+    rect(cx - w / 2 + s, cy + h / 2 - 5 * s, w - 2 * s, 4 * s, COL.barrelDk);
+    // Left side
+    rect(cx - w / 2, cy - h / 2, 2 * s, h, COL.barrelDk);
+    // Right side
+    rect(cx + w / 2 - 2 * s, cy - h / 2, 2 * s, h, [100, 60, 20]);
+    // Metal banding detail
+    rect(cx - w / 2, cy - h / 2 + 4 * s, w, 2 * s, [156, 100, 42]);
+    rect(cx - w / 2, cy + h / 2 - 6 * s, w, 2 * s, [156, 100, 42]);
+  } else {
+    // Top-down view
+    rect(cx - w / 2, cy - h / 2, w, h, COL.barrel);
+    rect(cx - w / 2, cy - h / 2, w, 2 * s, COL.barrelLt);
+    rect(cx - w / 2, cy + h / 2 - 2 * s, w, 2 * s, COL.barrelDk);
+    rect(cx - w / 2 + 2 * s, cy - h / 2, 2 * s, h, COL.barrelDk);
+    rect(cx + w / 2 - 4 * s, cy - h / 2, 2 * s, h, COL.barrelDk);
+  }
+  const a = spin % 6.28;
+  rect(cx - s + Math.cos(a) * 3 * s, cy - s + Math.sin(a) * 3 * s, 2 * s, 2 * s, COL.barrelLt);
+}
+
+function drawFireball(f) {
+  const cx = f.x + 6, cy = f.y + 5;
+  const w = 12 + Math.sin(f.anim) * 1.5;
+  rect(cx - w / 2, cy - 5, w, 10, COL.fire3);
+  rect(cx - w / 2 + 2, cy - 4, w - 4, 8, COL.fire2);
+  rect(cx - 3, cy - 3 + Math.sin(f.anim * 2), 6, 5, COL.fire1);
+  rect(cx - 2, cy - 2, 2, 2, COL.white);
+  rect(cx + 1, cy - 2, 2, 2, COL.white);
+  for (let i = 0; i < 3; i++) {
+    const t = (G.t * 6 + i * 1.7) % 3;
+    rect(cx - Math.sign(f.dir || 1) * (8 + t * 4), cy - 3 + Math.sin(G.t * 10 + i) * 3, 3 - t, 3 - t, [255, 140, 40, 0.5 - t * 0.15]);
+  }
+}
+
+function drawHammerPickup(h) {
+  if (h.taken) return;
+  const b = Math.sin(G.t * 3 + h.x) * 2;
+  rect(h.x - 1, h.y - 10 + b, 3, 16, COL.hammerDk);
+  rect(h.x - 7, h.y - 16 + b, 15, 8, COL.hammer);
+  rect(h.x - 7, h.y - 16 + b, 15, 2, COL.white);
+  if (Math.floor(G.t * 8) % 4 === 0) {
+    rect(h.x + 9, h.y - 20 + b, 2, 2, COL.white);
+    rect(h.x - 12, h.y - 6 + b, 2, 2, COL.white);
+  }
+}
+
+function drawItem(it) {
+  if (it.dead) return;
+  const b = Math.sin(G.t * 4 + it.x) * 1.5;
+  if (it.kind === 'purse') {
+    rect(it.x - 6, it.y - 5 + b, 12, 10, COL.fire1);
+    rect(it.x - 6, it.y - 5 + b, 12, 2, COL.white);
+    rect(it.x - 2, it.y - 8 + b, 4, 3, COL.fire2);
+  } else {
+    rect(it.x - 5, it.y - 5 + b, 10, 10, COL.clear);
+    rect(it.x - 2, it.y - 2 + b, 4, 4, COL.white);
+  }
+}
+
+function drawOilDrum() {
+  const x = DRUM.x, y = DRUM.y;
+  drawSprite(SP_DRUM, x, y, false, 2);
+  // flames licking out of the open top
+  for (let i = 0; i < 5; i++) {
+    const t = (G.t * 2.6 + i * 0.7) % 2;
+    rect(x + 2 + i * 4, y - 4 - t * 10, 3, 4, [255, 190 - t * 70, 40, 0.75 - t * 0.35]);
+  }
+  drawTextC('OIL', x + 10, y + 12, COL.white, 1);
+}
+
+/* ============================================================
+   GAME FLOW
+   ============================================================ */
+function setMode(m) { G.mode = m; G.modeT = 0; }
+
+function update() {
+  G.t += 1 / 60;
+  G.modeT++;
+  if (G.shake > 0) G.shake *= 0.86;
+  if (G.hitFlash > 0) G.hitFlash--;
+  if (G.kong.rage > 0) G.kong.rage--;
+
+  if (G.mode === 'paused') { for (const k in pressed) pressed[k] = false; return; }
+
+  // particles / floats always animate
+  for (const pt of G.parts) { pt.vy += 0.16; pt.x += pt.vx; pt.y += pt.vy; pt.life--; }
+  G.parts = G.parts.filter(p => p.life > 0);
+  for (const f of G.floats) { f.y -= 0.5; f.life--; }
+  G.floats = G.floats.filter(f => f.life > 0);
+  for (const it of G.items) if (!it.dead) it.life--;
+  G.items = G.items.filter(it => !it.dead && it.life > 0);
+
+  switch (G.mode) {
+    case 'title':
+      if (pressed.start) { SFX.start(); resetLevel(true); setMode('ready'); }
+      break;
+
+    case 'ready':
+      if (G.modeT > 70 || (pressed.start && G.modeT > 10)) setMode('play');
+      break;
+
+    case 'play': {
+      // bonus countdown
+      if (G.modeT % 14 === 0) {
+        G.bonus = Math.max(0, G.bonus - 100);
+        if (G.bonus > 0 && G.bonus % 500 === 0) SFX.bonus();
+      }
+      updatePlayer(G.player);
+      updateKong(G.kong);
+      for (const b of G.barrels) barrelStep(b);
+      for (const f of G.fireballs) fireballStep(f);
+      G.barrels = G.barrels.filter(b => !b.dead);
+      G.fireballs = G.fireballs.filter(f => !f.dead);
+      G.hammers = G.hammers.filter(h => !h.taken);   // a taken hammer is gone for good
+      checkHits();
+      // spawners
+      if (--G.spawnT <= 0) {
+        spawnBarrel();
+        G.spawnT = (Math.max(48, 120 - G.level * 10) + Math.random() * 70) * BARREL_RATE;
+      }
+      if (--G.fireT <= 0) {
+        spawnFireball();
+        G.fireT = Math.max(360, 900 - G.level * 60) + Math.random() * 300;
+      }
+      // reach Pauline
+      const p = G.player;
+      if (p.y + PH <= platform.y + 2 && p.x > platform.x1 - 6 && p.x < platform.x2 + 6) {
+        G.mode = 'complete'; G.modeT = 0; saveHi();
+        const timeBonus = G.bonus;
+        G.score += timeBonus + 1000;
+        G.bonusLeft = timeBonus;
+        SFX.complete();
+        burst(p.x, p.y, COL.clear, 40, 4);
+      }
+      break;
+    }
+
+    case 'complete':
+      if (G.modeT > 190) {
+        G.level++;
+        G.difficulty = 1 + G.level * 0.35;
+        buildLevel();
+        resetLevel(false);
+        setMode('ready');
+      }
+      break;
+
+    case 'dying':
+      G.player.vy += GRAV * 0.7;
+      G.player.y += G.player.vy;
+      if (G.modeT > 90) {
+        G.lives--;
+        if (G.lives <= 0) { saveHi(); setMode('gameover'); }
+        else {
+          const sc = G.score, lv = G.level, lf = G.lives, bo = Math.max(1000, G.bonus), d = G.difficulty;
+          resetLevel(false);
+          G.score = sc; G.level = lv; G.lives = lf; G.bonus = bo; G.difficulty = d;
+          G.player.invuln = 90;
+          setMode('ready');
+        }
+      }
+      break;
+
+    case 'gameover':
+      if (G.modeT > 60 && pressed.start) { resetLevel(true); setMode('ready'); }
+      break;
+  }
+  for (const k in pressed) pressed[k] = false;
+}
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function render() {
+  offX = (Math.random() - 0.5) * G.shake; offY = (Math.random() - 0.5) * G.shake;
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.uniform2f(uRes, VW, VH);
+  gl.clearColor(0, 0, 0, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  // pass 1: backdrop + oil drum (the drum sits under the girder overhang)
+  begin();
+  drawBackdrop();
+  drawOilDrum();
+  flush();
+
+  // pass 2: cached girders + ladders (rebuilt only by buildLevel)
+  drawStatic();
+
+  // pass 3: entities
+  begin();
+  drawHammerPickups();
+  drawPauline();
+  drawBarrelStack(G.kong);
+  drawKong(G.kong);
+  for (const it of G.items) drawItem(it);
+  for (const b of G.barrels) drawBarrelShape(b.x + BARREL_W / 2, b.y + BARREL_H / 2, b.spin, b.onGround ? b.roll : 0, BARREL_SCALE);
+  for (const f of G.fireballs) drawFireball(f);
+  if (G.mode !== 'gameover') drawPlayer(G.player);
+  for (const pt of G.parts) rect(pt.x, pt.y, 2, 2, [pt.col[0], pt.col[1], pt.col[2], Math.min(1, pt.life / 24)]);
+  for (const f of G.floats) drawText(f.text, f.x - f.text.length * 3, f.y, f.col, 1);
+
+  flush();
+
+  // pass 4: flash + HUD stay steady while the world shakes
+  offX = offY = 0;
+  begin();
+  if (G.hitFlash > 0) rect(0, 0, VW, VH, [255, 60, 40, G.hitFlash / 14]);
+  drawHud();
+  flush();
+  drawOverlay();
+}
+function drawHammerPickups() { for (const h of G.hammers) drawHammerPickup(h); }
+
+function drawPauline() {
+  const cx = 225, cy = platform.y - 13 * SPR_SCALE;
+  const help = G.mode === 'play' || G.mode === 'ready';
+  const bob = help ? Math.sin(G.t * 3) * 1 : 0;
+  drawSprite(SP_PAULINE, cx - 5 * SPR_SCALE, cy + bob, false, SPR_SCALE);
+  if (help && Math.floor(G.t * 2) % 2 === 0) {
+    drawText('HELP!', cx + 14, cy - 14, COL.white, 1);
+  }
+  if (G.mode === 'complete') {
+    // the embrace + hearts
+    for (let i = 0; i < 3; i++) {
+      const t = (G.t * 2 + i * 0.6) % 2;
+      const hx = 224 + Math.sin(G.t * 3 + i) * 10, hy = cy - 14 - t * 22;
+      rect(hx - 3, hy, 3, 3, COL.hatRed); rect(hx + 1, hy, 3, 3, COL.hatRed);
+      rect(hx - 2, hy + 3, 5, 3, COL.hatRed); rect(hx - 1, hy + 6, 3, 2, COL.hatRed);
+    }
+  }
+}
+
+/* ---------- tiny 3x5 bitmap font ---------- */
+const FONT = {
+  '0':['111','101','101','101','111'],'1':['010','110','010','010','111'],
+  '2':['111','001','111','100','111'],'3':['111','001','111','001','111'],
+  '4':['101','101','111','001','001'],'5':['111','100','111','001','111'],
+  '6':['111','100','111','101','111'],'7':['111','001','010','010','010'],
+  '8':['111','101','111','101','111'],'9':['111','101','111','001','111'],
+  'A':['010','101','111','101','101'],'B':['110','101','110','101','110'],
+  'C':['111','100','100','100','111'],'D':['110','101','101','101','110'],
+  'E':['111','100','111','100','111'],'F':['111','100','111','100','100'],
+  'G':['111','100','101','101','111'],'H':['101','101','111','101','101'],
+  'I':['111','010','010','010','111'],'J':['001','001','001','101','111'],
+  'K':['101','110','100','110','101'],'L':['100','100','100','100','111'],
+  'M':['101','111','111','101','101'],'N':['101','111','111','111','101'],
+  'O':['010','101','101','101','010'],'P':['110','101','110','100','100'],
+  'Q':['010','101','101','110','011'],'R':['110','101','110','110','101'],
+  'S':['111','100','111','001','111'],'T':['111','010','010','010','010'],
+  'U':['101','101','101','101','111'],'V':['101','101','101','101','010'],
+  'W':['101','101','111','111','101'],'X':['101','101','010','101','101'],
+  'Y':['101','101','010','010','010'],'Z':['111','001','010','100','111'],
+  ' ':['000','000','000','000','000'],'!':['010','010','010','000','010'],
+  '.':['000','000','000','000','010'],',':['000','000','000','010','100'],
+  '-':['000','000','111','000','000'],':':['000','010','000','010','000'],
+  '?':['111','001','011','000','010'],'/':['001','001','010','100','100'],
+  "'":['010','010','000','000','000'],'(':['001','010','010','010','001'],
+  ')':['100','010','010','010','100'],'+':['000','010','111','010','000'],
+  '=':['000','111','000','111','000'],'*':['000','101','010','101','000'],
+};
+function drawText(str, x, y, col, scale) {
+  const s = scale || 1;
+  str = String(str).toUpperCase();
+  for (let c = 0; c < str.length; c++) {
+    const gl_ = FONT[str[c]] || FONT[' '];
+    for (let r = 0; r < 5; r++) for (let q = 0; q < 3; q++) {
+      if (gl_[r][q] === '1') rect(x + (c * 4 + q) * s, y + r * s, s, s, col);
+    }
+  }
+}
+function textW(str, scale) { return String(str).length * 4 * (scale || 1); }
+function drawTextC(str, cx, y, col, s) { drawText(str, Math.round(cx - textW(str, s) / 2), y, col, s); }
+
+/* ---------- in-canvas arcade HUD ---------- */
+const HUD_RED = [248, 48, 48], HUD_CYAN = [48, 232, 248], HUD_BLUE = [88, 120, 248];
+
+function drawHud() {
+  const S = 3, y1 = 14, y2 = 34;
+  // 1UP + score
+  drawText('1UP', 20, y1, HUD_RED, S);
+  drawText(String(G.score).padStart(6, '0'), 20, y2, COL.white, S);
+
+  // HIGH SCORE
+  drawTextC('HIGH SCORE', 224, y1, HUD_RED, S);
+  drawTextC(String(G.hi).padStart(6, '0'), 224, y2, COL.white, S);
+
+  // level + bonus bar
+  drawText('L=' + String(G.level).padStart(2, '0'), 380, y1, HUD_BLUE, S);
+  const bw = 132, bh = 22, bx = 428 - bw, by = y2 - 4;
+  rect(bx, by, bw, bh, [40, 8, 12, 0.9]);
+  rect(bx, by, bw, 1, HUD_CYAN); rect(bx, by + bh - 1, bw, 1, HUD_CYAN);
+  rect(bx, by, 1, bh, HUD_CYAN); rect(bx + bw - 1, by, 1, bh, HUD_CYAN);
+  drawText('BONUS', bx + 7, by + 4, HUD_CYAN, 2);
+  const low = G.bonus <= 1000 && Math.floor(G.t * 4) % 2 === 0;
+  drawText(String(G.bonus).padStart(4, '0'), bx + bw - 7 - 4 * 8, by + 2, low ? HUD_RED : COL.white, 2);
+
+  // lives as little DK heads
+  for (let i = 0; i < Math.max(0, G.lives - 1); i++) {
+    const hx = 100 + i * 20, hy = y2 + 1;
+    rect(hx, hy, 14, 12, COL.kong);
+    rect(hx + 2, hy + 3, 10, 6, COL.kongFace);
+    rect(hx, hy, 14, 3, COL.kongDark);
+    rect(hx + 3, hy + 5, 2, 2, COL.black);
+    rect(hx + 9, hy + 5, 2, 2, COL.black);
+  }
+}
+
+/* ---------- HTML overlay ---------- */
+let lastHTML = '';
+
+function drawOverlay() {
+  let h = '';
+  const blink = '<span class="blink">';
+  switch (G.mode) {
+    case 'title':
+      h = `<div class="big">KONG</div>
+           <div class="sub">a WebGL arcade climb</div>
+           <div>climb the girders · dodge barrels ·<br>smash fireballs with a hammer · reach Pauline</div>
+           <div class="sub">${blink}press enter${'</span>'}</div>
+           <div class="sub">← → move &nbsp; ↑ ↓ climb &nbsp; space jump / swing</div>`;
+      break;
+    case 'ready':
+      h = `<div class="big">level ${G.level}</div><div>${blink}ready${'</span>'}</div>`;
+      break;
+    case 'paused':
+      h = `<div class="big">paused</div><div class="sub">${blink}press p${'</span>'}</div>`;
+      break;
+    case 'complete':
+      h = `<div class="big">level clear!</div>
+           <div>time bonus ${G.bonusLeft || 0}</div>
+           <div class="sub">next level climbing${'!'}</div>`;
+      break;
+    case 'gameover':
+      h = `<div class="big" style="color:var(--danger)">game over</div>
+           <div>score ${String(G.score).padStart(6, '0')}</div>
+           <div class="sub">${blink}press enter${'</span>'}</div>`;
+      break;
+  }
+  if (h !== lastHTML) { msgEl.innerHTML = h; lastHTML = h; }
+}
+
+/* ============================================================
+   MAIN LOOP (fixed 60Hz step)
+   ============================================================ */
+let acc = 0, last = performance.now();
+function frame(now) {
+  const dt = Math.min(100, now - last); last = now;
+  acc += dt;
+  let guard = 0;
+  while (acc >= 1000 / 60 && guard++ < 5) { update(); acc -= 1000 / 60; }
+  resize();
+  render();
+  requestAnimationFrame(frame);
+}
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Tetris</title>
+<style>
+  :root{
+    --bg:#05070d;
+    --ink:#e8f4ff;
+    --dim:#7d8ea8;
+    --accent:#35d3ff;
+    --accent2:#c56bff;
+    --panel:rgba(12,18,32,.84);
+    --edge:rgba(90,150,220,.28);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--ink)}
+  body{
+    font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    user-select:none;
+    touch-action:none;
+  }
+  #gl{position:fixed;inset:0;width:100%;height:100%;display:block}
+  #ui{position:fixed;inset:0;pointer-events:none}
+
+  .panel{
+    position:absolute;
+    background:var(--panel);
+    border:1px solid var(--edge);
+    border-radius:10px;
+    padding:10px 12px;
+    /* no backdrop-filter: the hold/next previews are drawn on the canvas behind
+       these panels and a backdrop blur would smear them */
+    box-shadow:0 0 24px rgba(0,0,0,.45), inset 0 0 22px rgba(40,90,160,.08);
+  }
+  .ptitle{
+    font-size:11px;letter-spacing:.28em;text-transform:uppercase;
+    color:var(--accent);opacity:.85;margin-bottom:8px;font-weight:700;
+    text-shadow:0 0 12px rgba(53,211,255,.55);
+  }
+  .slot{position:relative}
+  #hold-slot{height:58px}
+  #next-slot{height:290px}
+
+  #brand{
+    position:absolute;top:16px;left:50%;transform:translateX(-50%);
+    pointer-events:none;white-space:nowrap;
+    font-weight:800;letter-spacing:.42em;font-size:15px;
+    color:#fff;opacity:.9;text-shadow:0 0 18px rgba(53,211,255,.6);
+  }
+  #brand span{color:var(--accent2);text-shadow:0 0 18px rgba(197,107,255,.6)}
+
+  .row{display:flex;justify-content:space-between;align-items:baseline;gap:14px;margin:3px 0}
+  .k{font-size:10px;letter-spacing:.2em;color:var(--dim);text-transform:uppercase}
+  .v{font-family:Consolas,"Courier New",monospace;font-size:15px;font-weight:700;color:#fff;
+     font-variant-numeric:tabular-nums;text-shadow:0 0 10px rgba(120,200,255,.35)}
+  .v.big{font-size:26px;letter-spacing:.02em;color:var(--accent);text-shadow:0 0 18px rgba(53,211,255,.55)}
+  .sep{height:1px;background:linear-gradient(90deg,transparent,var(--edge),transparent);margin:9px 0}
+
+  .keys{font-size:11px;line-height:1.85;color:var(--dim)}
+  .keys b{display:inline-block;min-width:52px;color:var(--ink);font-family:Consolas,monospace;font-weight:700}
+  .keys i{color:var(--accent);font-style:normal}
+
+  #center{
+    position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;pointer-events:none;transition:opacity .18s ease;
+  }
+  #center .big{
+    font-size:44px;font-weight:900;letter-spacing:.16em;
+    color:#fff;text-shadow:0 0 30px rgba(53,211,255,.85),0 0 70px rgba(197,107,255,.5);
+  }
+  #center .sub{margin-top:12px;font-size:12px;letter-spacing:.3em;color:var(--dim);text-transform:uppercase}
+  #toast{
+    position:absolute;left:50%;top:16%;transform:translate(-50%,0);
+    font-size:22px;font-weight:800;letter-spacing:.22em;text-transform:uppercase;
+    color:#fff;opacity:0;text-shadow:0 0 24px rgba(53,211,255,.9);
+    transition:opacity .25s ease, transform .25s ease;
+  }
+  #toast.show{opacity:1;transform:translate(-50%,-8px)}
+  #fps{position:absolute;right:12px;bottom:10px;font-family:Consolas,monospace;font-size:11px;color:rgba(125,142,168,.6)}
+  .hidden{opacity:0 !important;visibility:hidden !important}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="ui">
+  <div id="brand">TETRIS</div>
+
+  <div class="panel" id="p-hold"><div class="ptitle">Hold</div><div class="slot" id="hold-slot"></div></div>
+  <div class="panel" id="p-stats">
+    <div class="row"><span class="k">Score</span><span class="v big" id="v-score">0</span></div>
+    <div class="sep"></div>
+    <div class="row"><span class="k">Best</span><span class="v" id="v-best">0</span></div>
+    <div class="row"><span class="k">Lines</span><span class="v" id="v-lines">0</span></div>
+    <div class="row"><span class="k">Level</span><span class="v" id="v-level">1</span></div>
+    <div class="row"><span class="k">Time</span><span class="v" id="v-time">0:00</span></div>
+    <div class="sep"></div>
+    <div class="row"><span class="k">Combo</span><span class="v" id="v-combo">—</span></div>
+    <div class="row"><span class="k">Back&nbsp;to&nbsp;back</span><span class="v" id="v-b2b">—</span></div>
+    <div class="row"><span class="k">PPS</span><span class="v" id="v-pps">0.0</span></div>
+  </div>
+
+  <div class="panel" id="p-next"><div class="ptitle">Next</div><div class="slot" id="next-slot"></div></div>
+  <div class="panel" id="p-help">
+    <div class="keys">
+      <div><b>← →</b> move</div>
+      <div><b>↓</b> soft drop</div>
+      <div><b>Space</b> hard drop</div>
+      <div><b>↑ / X</b> rotate cw</div>
+      <div><b>Z</b> rotate ccw</div>
+      <div><b>A</b> rotate 180</div>
+      <div><b>C</b> <i>hold</i></div>
+      <div><b>P</b> pause · <b>R</b> restart</div>
+    </div>
+  </div>
+
+  <div id="center" class="hidden">
+    <div class="big" id="center-big">READY</div>
+    <div class="sub" id="center-sub">Press Enter to start</div>
+  </div>
+  <div id="toast"></div>
+  <div id="fps"></div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   STEP 2 — WebGL renderer: animated background + batched quads
+   ============================================================ */
+const GL = (() => {
+  const canvas = document.getElementById('gl');
+  const gl = canvas.getContext('webgl', { antialias: true, alpha: false, powerPreference: 'high-performance' })
+          || canvas.getContext('experimental-webgl', { antialias: true, alpha: false });
+  if (!gl) throw new Error('WebGL unavailable');
+
+  const VS_BG = `
+    attribute vec2 aCorner;
+    varying vec2 vUv;
+    void main(){ vUv = aCorner; gl_Position = vec4(aCorner, 0.0, 1.0); }
+  `;
+  const FS_BG = `
+    precision highp float;
+    varying vec2 vUv;
+    uniform vec2  uRes;
+    uniform float uTime;
+    uniform float uEnergy;   // 0..1 pulse from line clears
+    uniform float uSpin;     // spin axis of the tunnel
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    void main(){
+      // vUv already spans -1..1 across the screen (fullscreen triangle), so the
+      // vanishing point is at uv = 0. The old (uv - 0.5) pushed the tunnel
+      // off-centre (right and down); uv * asp keeps the same scale but centres it.
+      vec2 uv = vUv;
+      vec2 asp = vec2(uRes.x / uRes.y, 1.0);
+      vec2 p = uv * asp;
+
+      // deep space base gradient
+      float r = length(p);
+      vec3 col = mix(vec3(0.035, 0.055, 0.105), vec3(0.008, 0.012, 0.030), smoothstep(0.0, 1.05, r));
+
+      // slow drifting nebula
+      float t = uTime * 0.05;
+      float neb = sin(p.x * 2.3 + t) * cos(p.y * 1.9 - t * 1.3) * 0.5 + 0.5;
+      col += vec3(0.05, 0.10, 0.20) * pow(neb, 3.0) * 0.55;
+      col += vec3(0.10, 0.03, 0.18) * pow(1.0 - neb, 4.0) * 0.35;
+
+      // perspective grid floor + ceiling
+      float horizon = 0.02;
+      for (int s = 0; s < 2; s++) {
+        float sy = (s == 0) ? 1.0 : -1.0;
+        float y = (p.y - horizon * sy);
+        if (sy * y > 0.0005) {
+          float depth = 1.0 / (sy * y);
+          float gz = depth * 1.6 + uTime * 0.55;
+          float gx = p.x * depth * 0.9 + uSpin * 0.4;
+          float lx = abs(fract(gx) - 0.5) - 0.465;
+          float lz = abs(fract(gz) - 0.5) - 0.470;
+          float g = max(smoothstep(0.035, 0.0, lx), smoothstep(0.030, 0.0, lz));
+          float fade = exp(-depth * 0.16) * exp(-sy * y * 1.4);
+          col += vec3(0.10, 0.34, 0.55) * g * fade * (0.55 + uEnergy * 0.9);
+        }
+      }
+
+      // star speckles
+      vec2 sc = floor(uv * vec2(160.0, 90.0));
+      float h = hash(sc);
+      if (h > 0.986) {
+        float tw = 0.55 + 0.45 * sin(uTime * (1.5 + h * 6.0) + h * 40.0);
+        col += vec3(0.75, 0.88, 1.0) * tw * 0.55 * smoothstep(0.986, 1.0, h) * 40.0 * 0.02;
+      }
+
+      // energy flash
+      col += vec3(0.10, 0.30, 0.55) * uEnergy * (1.0 - r * 0.55) * 0.30;
+      // vignette
+      col *= 1.0 - smoothstep(0.45, 1.25, r) * 0.72;
+      // subtle scanlines
+      col *= 0.965 + 0.035 * sin(gl_FragCoord.y * 3.14159);
+      gl_FragColor = vec4(pow(max(col, 0.0), vec3(0.92)), 1.0);
+    }
+  `;
+
+  const VS_QUAD = `
+    attribute vec2 aCorner;   // 0..1 within the quad
+    attribute vec2 aPos;      // top-left corner, pixels (y down)
+    attribute vec2 aSize;     // size, pixels
+    attribute vec4 aColor;
+    attribute float aGlow;
+    uniform vec2 uRes;
+    varying vec2 vUv;
+    varying vec2 vSize;
+    varying vec4 vColor;
+    varying float vGlow;
+    void main(){
+      vUv = aCorner; vSize = aSize; vColor = aColor; vGlow = aGlow;
+      vec2 px = aPos + aCorner * aSize;
+      vec2 clip = (px / uRes) * 2.0 - 1.0;
+      gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+    }
+  `;
+  const FS_QUAD = `
+    precision highp float;
+    varying vec2 vUv;
+    varying vec2 vSize;
+    varying vec4 vColor;
+    varying float vGlow;
+    float sdRoundBox(vec2 p, vec2 b, float rad){
+      vec2 q = abs(p) - b + rad;
+      return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - rad;
+    }
+    void main(){
+      vec2 p = (vUv - 0.5) * vSize;
+      vec2 b = vSize * 0.5 - 0.5;
+      // corner radius must never exceed half the thickness or the quad disappears
+      float rad = clamp(min(vSize.x, vSize.y) * 0.16, 0.0, 9.0);
+      rad = max(min(rad, min(b.x, b.y)), 0.0);
+      float d = sdRoundBox(p, b, rad);
+
+      float alpha = 0.0;
+      vec3 acc = vec3(0.0);
+
+      // outer glow halo
+      float halo = exp(-max(d, 0.0) * 0.30) * vGlow;
+      acc += vColor.rgb * halo * 0.85;
+      alpha += halo * 0.55;
+
+      // body
+      float inside = smoothstep(0.5, -0.5, d);
+      float bevel = smoothstep(-1.0, -6.0, d);
+      vec3 base = vColor.rgb;
+      vec3 dark = base * 0.34 + 0.02;
+      vec3 lite = base * 0.55 + 0.62;
+      float vy = (vUv.y - 0.5);
+      vec3 body = mix(dark, base, 0.55 - vy * 0.75);
+      body = mix(body, lite, pow(clamp(-vy * 1.6 + 0.30, 0.0, 1.0), 2.2) * 0.85);
+      // inner rim light
+      float rim = smoothstep(-2.0, -0.2, d) * bevel;
+      body += lite * rim * 0.55;
+      // glossy streak
+      float gloss = exp(-pow((vUv.y - 0.26) * 5.5, 2.0)) * exp(-pow((vUv.x - 0.34) * 2.6, 2.0));
+      body += vec3(1.0) * gloss * 0.20;
+
+      acc += body * inside * vColor.a;
+      alpha += inside * vColor.a;
+
+      if (alpha <= 0.003) discard;
+      gl_FragColor = vec4(acc, clamp(alpha, 0.0, 1.0));
+    }
+  `;
+
+  function compile(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      throw new Error('shader: ' + gl.getShaderInfoLog(s) + '\n' + src);
+    }
+    return s;
+  }
+  function program(vs, fs, attribs) {
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    if (attribs) for (let i = 0; i < attribs.length; i++) gl.bindAttribLocation(p, i, attribs[i]);
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error('link: ' + gl.getProgramInfoLog(p));
+    return p;
+  }
+
+  const STRIDE = 11; // floats per vertex
+  const MAX_QUADS = 4096;
+  const data = new Float32Array(MAX_QUADS * 6 * STRIDE);
+  let count = 0;
+
+  // GL objects live in let-bindings so they can be rebuilt after a context loss
+  let progBG, progQuad, uBG, uQ, aQ, vbo, bgBuf;
+  let lost = false;
+
+  function initResources() {
+    progBG = program(VS_BG, FS_BG, ['aCorner']);
+    progQuad = program(VS_QUAD, FS_QUAD, ['aCorner', 'aPos', 'aSize', 'aColor', 'aGlow']);
+
+    uBG = { res: gl.getUniformLocation(progBG, 'uRes'), time: gl.getUniformLocation(progBG, 'uTime'),
+            energy: gl.getUniformLocation(progBG, 'uEnergy'), spin: gl.getUniformLocation(progBG, 'uSpin') };
+    uQ = { res: gl.getUniformLocation(progQuad, 'uRes') };
+    aQ = {
+      corner: gl.getAttribLocation(progQuad, 'aCorner'),
+      pos: gl.getAttribLocation(progQuad, 'aPos'),
+      size: gl.getAttribLocation(progQuad, 'aSize'),
+      color: gl.getAttribLocation(progQuad, 'aColor'),
+      glow: gl.getAttribLocation(progQuad, 'aGlow')
+    };
+
+    vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, data.byteLength, gl.DYNAMIC_DRAW);
+
+    bgBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, bgBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+
+    gl.enable(gl.BLEND);
+    gl.disable(gl.DEPTH_TEST);
+    count = 0;
+  }
+  initResources();
+
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();          // ask the driver to give us the context back
+    lost = true;
+    count = 0;
+  }, false);
+
+  canvas.addEventListener('webglcontextrestored', () => {
+    try { initResources(); resize(); lost = false; }
+    catch (err) { lost = true; }
+  }, false);
+
+  function bindQuadAttribs() {
+    const S = STRIDE * 4;
+    gl.enableVertexAttribArray(aQ.corner); gl.vertexAttribPointer(aQ.corner, 2, gl.FLOAT, false, S, 0);
+    gl.enableVertexAttribArray(aQ.pos);    gl.vertexAttribPointer(aQ.pos, 2, gl.FLOAT, false, S, 8);
+    gl.enableVertexAttribArray(aQ.size);   gl.vertexAttribPointer(aQ.size, 2, gl.FLOAT, false, S, 16);
+    gl.enableVertexAttribArray(aQ.color);  gl.vertexAttribPointer(aQ.color, 4, gl.FLOAT, false, S, 24);
+    gl.enableVertexAttribArray(aQ.glow);   gl.vertexAttribPointer(aQ.glow, 1, gl.FLOAT, false, S, 40);
+  }
+
+  let W = 1, H = 1, dpr = 1;
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+    H = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+    if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+    gl.viewport(0, 0, W, H);
+  }
+
+  // x,y in CSS pixels; w,h in CSS pixels
+  function quad(x, y, w, h, r, g, b, a, glow) {
+    if (count >= MAX_QUADS) return;
+    let o = count * 6 * STRIDE;
+    const corners = [0,0, 1,0, 1,1, 0,0, 1,1, 0,1];
+    for (let i = 0; i < 6; i++) {
+      data[o++] = corners[i*2]; data[o++] = corners[i*2+1];
+      data[o++] = x; data[o++] = y;
+      data[o++] = w; data[o++] = h;
+      data[o++] = r; data[o++] = g; data[o++] = b; data[o++] = a;
+      data[o++] = glow || 0;
+    }
+    count++;
+  }
+
+  function beginFrame(time, energy, spin) {
+    resize();
+    if (lost) return;
+    gl.clearColor(0.01, 0.014, 0.03, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(progBG);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bgBuf);
+    gl.disableVertexAttribArray(aQ.pos); gl.disableVertexAttribArray(aQ.size);
+    gl.disableVertexAttribArray(aQ.color); gl.disableVertexAttribArray(aQ.glow);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(uBG.res, W, H);
+    gl.uniform1f(uBG.time, time);
+    gl.uniform1f(uBG.energy, energy);
+    gl.uniform1f(uBG.spin, spin);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    count = 0;
+  }
+
+  function endFrame() {
+    if (lost) { count = 0; return; }
+    if (count > 0) {
+      gl.useProgram(progQuad);
+      gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.subarray(0, count * 6 * STRIDE));
+      bindQuadAttribs();
+      gl.uniform2f(uQ.res, W / dpr, H / dpr);
+      // shader emits premultiplied colour
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.drawArrays(gl.TRIANGLES, 0, count * 6);
+      count = 0;
+    }
+  }
+
+  return {
+    canvas, gl, resize, quad, beginFrame, endFrame,
+    get dpr() { return dpr; },
+    get lost() { return lost; },
+    get width() { return canvas.clientWidth; },
+    get height() { return canvas.clientHeight; }
+  };
+})();
+/* ============================================================
+   STEP 3 — game core: board, SRS, gravity, scoring
+   ============================================================ */
+const COLS = 10, ROWS = 20, HIDDEN = 0, TOTAL = ROWS + HIDDEN;
+
+// Tetromino colours (linear-ish sRGB 0..1)
+const PAL = {
+  I: [0.20, 0.86, 1.00],
+  J: [0.33, 0.50, 1.00],
+  L: [1.00, 0.62, 0.18],
+  O: [1.00, 0.86, 0.25],
+  S: [0.36, 0.94, 0.47],
+  Z: [1.00, 0.33, 0.47],
+  T: [0.76, 0.44, 1.00]
+};
+
+// SRS spawn states, 4x4 matrices (row-major, y down)
+const SHAPES = {
+  I: [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+  J: [[1,0,0],[1,1,1],[0,0,0]],
+  L: [[0,0,1],[1,1,1],[0,0,0]],
+  O: [[1,1],[1,1]],
+  S: [[0,1,1],[1,1,0],[0,0,0]],
+  T: [[0,1,0],[1,1,1],[0,0,0]],
+  Z: [[1,1,0],[0,1,1],[0,0,0]]
+};
+const TYPES = ['I','J','L','O','S','T','Z'];
+
+// Rotation tables precomputed: ROT[type][state] -> array of [x,y] cells
+function rotCW(m) {
+  const n = m.length, out = [];
+  for (let y = 0; y < n; y++) { out.push(new Array(n).fill(0)); }
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) out[y][x] = m[n - 1 - x][y];
+  return out;
+}
+const ROT = {};
+for (const t of TYPES) {
+  const states = [SHAPES[t]];
+  for (let i = 1; i < 4; i++) states.push(rotCW(states[i - 1]));
+  ROT[t] = states.map(m => {
+    const cells = [];
+    for (let y = 0; y < m.length; y++) for (let x = 0; x < m.length; x++) if (m[y][x]) cells.push([x, y]);
+    return cells;
+  });
+}
+
+// SRS wall-kick offsets. For J/L/S/T/Z:
+const KICK_JLSTZ = {
+  '0>1': [[0,0],[-1,0],[-1,1],[0,-2],[-1,-2]],
+  '1>0': [[0,0],[1,0],[1,-1],[0,2],[1,2]],
+  '1>2': [[0,0],[1,0],[1,-1],[0,2],[1,2]],
+  '2>1': [[0,0],[-1,0],[-1,1],[0,-2],[-1,-2]],
+  '2>3': [[0,0],[1,0],[1,1],[0,-2],[1,-2]],
+  '3>2': [[0,0],[-1,0],[-1,-1],[0,2],[-1,2]],
+  '3>0': [[0,0],[-1,0],[-1,-1],[0,2],[-1,2]],
+  '0>3': [[0,0],[1,0],[1,1],[0,-2],[1,-2]]
+};
+const KICK_I = {
+  '0>1': [[0,0],[-2,0],[1,0],[-2,-1],[1,2]],
+  '1>0': [[0,0],[2,0],[-1,0],[2,1],[-1,-2]],
+  '1>2': [[0,0],[-1,0],[2,0],[-1,2],[2,-1]],
+  '2>1': [[0,0],[1,0],[-2,0],[1,-2],[-2,1]],
+  '2>3': [[0,0],[2,0],[-1,0],[2,1],[-1,-2]],
+  '3>2': [[0,0],[-2,0],[1,0],[-2,-1],[1,2]],
+  '3>0': [[0,0],[1,0],[-2,0],[1,-2],[-2,1]],
+  '0>3': [[0,0],[-1,0],[2,0],[-1,2],[2,-1]]
+};
+// 180 kick set (simple: no offset, then a couple of nudges)
+const KICK_180 = [[0,0],[0,-1],[1,0],[-1,0],[0,1]];
+
+// Gravity: seconds per row per level (TGM-ish curve, capped)
+function gravityFor(level) {
+  const l = Math.min(level, 20);
+  return Math.max(0.016, Math.pow(0.8 - (l - 1) * 0.007, l - 1));
+}
+
+const Game = {
+  board: null,
+  piece: null, hold: null, canHold: true,
+  bag: [], queue: [],
+  score: 0, best: 0, lines: 0, level: 1, combo: -1, b2b: -1,
+  state: 'ready',            // ready | playing | paused | over
+  startedAt: 0, elapsed: 0,
+  dropTimer: 0, lockTimer: 0, lockResets: 0, grounded: false,
+  softDropping: false,
+  piecesPlaced: 0,
+  clearFlash: [],            // {row, t}
+  particles: [],
+  shake: 0, energy: 0,
+  stats: { pieces: 0, seconds: 0 },
+
+  reset() {
+    this.board = new Int8Array(COLS * TOTAL); // 0 empty, else type index+1
+    this.piece = null; this.hold = null; this.canHold = true;
+    this.bag = []; this.queue = [];
+    this.score = 0; this.lines = 0; this.level = 1; this.combo = -1; this.b2b = -1;
+    this.dropTimer = 0; this.lockTimer = 0; this.lockResets = 0; this.grounded = false;
+    this.clearFlash = []; this.particles = []; this.shake = 0;
+    this.piecesPlaced = 0; this.stats = { pieces: 0, seconds: 0 };
+    for (let i = 0; i < 5; i++) this.queue.push(this.take());
+  },
+
+  refill() {
+    if (this.bag.length === 0) {
+      this.bag = TYPES.slice();
+      for (let i = this.bag.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        [this.bag[i], this.bag[j]] = [this.bag[j], this.bag[i]];
+      }
+    }
+    return this.bag.pop();
+  },
+  take() { return this.refill(); },
+
+  idx(x, y) { return y * COLS + x; },
+  inside(x, y) { return x >= 0 && x < COLS && y < TOTAL; },
+  solid(x, y) {
+    if (x < 0 || x >= COLS || y >= TOTAL) return true;
+    if (y < 0) return false;
+    return this.board[y * COLS + x] !== 0;
+  },
+
+  cells(p) { return ROT[p.type][p.rot]; },
+
+  fits(type, rot, px, py) {
+    for (const [cx, cy] of ROT[type][rot]) {
+      const x = px + cx, y = py + cy;
+      if (x < 0 || x >= COLS || y >= TOTAL) return false;
+      if (y >= 0 && this.board[y * COLS + x] !== 0) return false;
+    }
+    return true;
+  },
+
+  spawn(type) {
+    const t = type || this.queue.shift() || this.take();
+    while (this.queue.length < 5) this.queue.push(this.take());
+    const p = { type: t, rot: 0, x: (t === 'O' ? 4 : 3), y: (t === 'I' ? -1 : 0), rotated: false, lastKick: null };
+    if (!this.fits(p.type, p.rot, p.x, p.y)) {
+      this.piece = p;
+      this.gameOver();
+      return false;
+    }
+    this.piece = p;
+    this.dropTimer = 0; this.lockTimer = 0; this.lockResets = 0; this.grounded = false;
+    this.canHold = true;
+    return true;
+  },
+
+  tryMove(dx, dy) {
+    const p = this.piece; if (!p) return false;
+    if (this.fits(p.type, p.rot, p.x + dx, p.y + dy)) {
+      p.x += dx; p.y += dy;
+      if (dy === 0 && this.grounded && this.lockResets < 15) { this.lockTimer = 0; this.lockResets++; }
+      this.grounded = !this.fits(p.type, p.rot, p.x, p.y + 1);
+      return true;
+    }
+    return false;
+  },
+
+  tryRotate(dir) { // dir: 1 cw, -1 ccw, 2 = 180
+    const p = this.piece; if (!p) return false;
+    if (p.type === 'O') return false;
+    if (dir === 2) {
+      const to = (p.rot + 2) % 4;
+      for (const [kx, ky] of KICK_180) {
+        if (this.fits(p.type, to, p.x + kx, p.y + ky)) {
+          p.rot = to; p.x += kx; p.y += ky;
+          this.afterRotate(); return true;
+        }
+      }
+      return false;
+    }
+    const from = p.rot, to = (p.rot + (dir > 0 ? 1 : 3)) % 4;
+    const table = (p.type === 'I' ? KICK_I : KICK_JLSTZ)[from + '>' + to];
+    for (const [kx, ky] of table) {
+      // SRS tables use y-up; our y is down, so negate ky
+      if (this.fits(p.type, to, p.x + kx, p.y - ky)) {
+        p.rot = to; p.x += kx; p.y -= ky;
+        this.afterRotate();
+        return true;
+      }
+    }
+    return false;
+  },
+
+  afterRotate() {
+    const p = this.piece;
+    if (this.grounded && this.lockResets < 15) { this.lockTimer = 0; this.lockResets++; }
+    this.grounded = !this.fits(p.type, p.rot, p.x, p.y + 1);
+  },
+
+  ghostY() {
+    const p = this.piece; if (!p) return 0;
+    let y = p.y;
+    while (this.fits(p.type, p.rot, p.x, y + 1)) y++;
+    return y;
+  },
+
+  hardDropDistance() {
+    const p = this.piece; if (!p) return 0;
+    return this.ghostY() - p.y;
+  },
+
+  lock() {
+    const p = this.piece; if (!p) return;
+    const ci = TYPES.indexOf(p.type) + 1;
+    let maxY = -1e9;
+    for (const [cx, cy] of this.cells(p)) {
+      const x = p.x + cx, y = p.y + cy;
+      if (y >= 0 && y < TOTAL) this.board[y * COLS + x] = ci;
+      if (y > maxY) maxY = y;
+    }
+    this.piecesPlaced++; this.stats.pieces++;
+
+    // --- detect T-spin (3-corner rule, mini refinement) ---
+    let spin = 0; // 0 none, 1 mini, 2 full
+    if (p.type === 'T' && p.rotated) {
+      const cx = p.x + 1, cy = p.y + 1; // T centre in SRS 3x3 box
+      const corners = [[-1,-1],[1,-1],[-1,1],[1,1]];
+      let occ = 0, front = 0;
+      const facing = [[0,-1],[1,0],[0,1],[-1,0]][p.rot];
+      for (let i = 0; i < 4; i++) {
+        const [ox, oy] = corners[i];
+        const solid = this.solid(cx + ox, cy + oy);
+        if (solid) occ++;
+      }
+      // two "front" corners are the ones adjacent to the facing direction
+      const frontPairs = [[0,1],[1,3],[2,3],[0,2]]; // by rot: 0=up,1=right,2=down,3=left
+      const [a, b] = frontPairs[p.rot];
+      const fa = this.solid(cx + corners[a][0], cy + corners[a][1]);
+      const fb = this.solid(cx + corners[b][0], cy + corners[b][1]);
+      if (occ >= 3) spin = (fa && fb) ? 2 : 1;
+      // last-rotation-kick override: a big kick promotes mini to full
+      if (spin === 1 && p.lastKick && Math.abs(p.lastKick[0]) + Math.abs(p.lastKick[1]) >= 2) spin = 2;
+    }
+
+    // --- line clears ---
+    const full = [];
+    for (let y = 0; y < TOTAL; y++) {
+      let ok = true;
+      for (let x = 0; x < COLS; x++) if (this.board[y * COLS + x] === 0) { ok = false; break; }
+      if (ok) full.push(y);
+    }
+
+    const n = full.length;
+    const difficult = (n === 4) || (spin > 0 && n > 0);
+    let gained = 0, label = '';
+
+    if (n > 0) {
+      const base = [0, 100, 300, 500, 800][n];
+      let mult = base;
+      if (spin === 2) { mult = [0, 800, 1200, 1600, 0][n] || base * 3; label = 'T-SPIN '; }
+      else if (spin === 1) { mult = [0, 100, 200, 400, 0][n] || base; label = 'T-SPIN MINI '; }
+      gained += mult * this.level;
+      if (this.b2b >= 1 && difficult) gained = Math.floor(gained * 1.5);
+      if (n === 4 && this.b2b >= 1) label = 'BACK-TO-BACK ';
+      this.combo++;
+      if (this.combo > 0) gained += 50 * this.combo * this.level;
+      this.b2b = difficult ? this.b2b + 1 : -1;
+      this.lines += n;
+      const newLevel = Math.min(20, Math.floor(this.lines / 10) + 1);
+      if (newLevel !== this.level) { this.level = newLevel; UI.toast('LEVEL ' + this.level); }
+      this.clearFlash = full.map(y => ({ row: y, t: 0 }));
+      this.spawnClearParticles(full);
+      this.shake = Math.min(1, 0.22 + n * 0.2 + (spin ? 0.25 : 0));
+      this.energy = Math.min(1.2, 0.45 + n * 0.18);
+      // compact: keep non-cleared rows in order, blank the top n rows
+      const fullSet = new Set(full);
+      let w = TOTAL - 1;
+      for (let y = TOTAL - 1; y >= 0; y--) {
+        if (fullSet.has(y)) continue;
+        if (w !== y) this.board.copyWithin(w * COLS, y * COLS, (y + 1) * COLS);
+        w--;
+      }
+      for (let y = w; y >= 0; y--) this.board.fill(0, y * COLS, (y + 1) * COLS);
+    } else {
+      this.combo = -1;
+    }
+
+    // perfect clear bonus
+    let empty = true;
+    for (let i = 0; i < this.board.length; i++) if (this.board[i] !== 0) { empty = false; break; }
+    if (empty && this.piecesPlaced > 1) {
+      gained += [0, 800, 1200, 1800, 2000, 2500][Math.min(n, 5)] * this.level;
+      label = 'PERFECT CLEAR';
+      this.energy = 1.4; this.shake = 1;
+    }
+
+    if (spin === 2 && n === 0) { gained += 400 * this.level; label = 'T-SPIN'; }
+
+    this.score += gained;
+    if (this.score > this.best) { this.best = this.score; saveBest(this.best); }
+
+    if (label) UI.toast(label + (n > 0 ? ['',' SINGLE',' DOUBLE',' TRIPLE',' TETRIS'][n] : '') + (gained ? '  +' + gained : ''));
+    else if (n === 4) UI.toast('TETRIS  +' + gained);
+    else if (n > 0) UI.toast(['','SINGLE','DOUBLE','TRIPLE'][n] + '  +' + gained);
+    if (this.combo > 0) UI.toast('COMBO x' + (this.combo + 1));
+
+    // lock-out: piece came to rest entirely above the visible field
+    if (maxY < 0) { this.gameOver(); return; }
+    this.piece = null;
+    this.spawn();
+  },
+
+  softStep() {
+    if (!this.tryMove(0, 1)) return false;
+    this.score += 1;
+    return true;
+  },
+
+  update(dt) {
+    if (this.state !== 'playing') { this.energy *= Math.pow(0.02, dt); this.shake *= Math.pow(0.001, dt); return; }
+    this.elapsed += dt; this.stats.seconds += dt;
+
+    // gravity
+    const g = gravityFor(this.level);
+    const interval = this.softDropping ? Math.min(g, 1 / 20) : g;
+    this.dropTimer += dt;
+    while (this.dropTimer >= interval) {
+      this.dropTimer -= interval;
+      if (!this.tryMove(0, 1)) break;
+      if (this.softDropping) this.score += 1;
+    }
+
+    const p = this.piece;
+    if (p) {
+      this.grounded = !this.fits(p.type, p.rot, p.x, p.y + 1);
+      if (this.grounded) {
+        this.lockTimer += dt;
+        if (this.lockTimer >= 0.5) this.lock();
+      } else this.lockTimer = 0;
+    }
+
+    // effects decay
+    for (let i = this.clearFlash.length - 1; i >= 0; i--) {
+      this.clearFlash[i].t += dt;
+      if (this.clearFlash[i].t > 0.32) this.clearFlash.splice(i, 1);
+    }
+    this.energy *= Math.pow(0.10, dt);
+    this.shake *= Math.pow(0.0008, dt);
+    this.updateParticles(dt);
+  },
+
+  spawnClearParticles(rows) {
+    for (const row of rows) {
+      for (let x = 0; x < COLS; x++) {
+        const ci = this.board[row * COLS + x];
+        if (!ci) continue;
+        const col = PAL[TYPES[ci - 1]];
+        for (let k = 0; k < 3; k++) {
+          this.particles.push({
+            x: x + 0.5 + (Math.random() - 0.5) * 0.6,
+            y: row + 0.5,
+            vx: (Math.random() - 0.5) * 9,
+            vy: (Math.random() - 0.7) * 7,
+            life: 0.5 + Math.random() * 0.5,
+            age: 0,
+            c: col
+          });
+        }
+      }
+    }
+    if (this.particles.length > 1400) this.particles.splice(0, this.particles.length - 1400);
+  },
+  updateParticles(dt) {
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const q = this.particles[i];
+      q.age += dt;
+      if (q.age >= q.life) { this.particles.splice(i, 1); continue; }
+      q.x += q.vx * dt; q.y += q.vy * dt; q.vy += 26 * dt; q.vx *= Math.pow(0.25, dt);
+    }
+  },
+
+  holdPiece() {
+    if (!this.canHold || !this.piece || this.state !== 'playing') return;
+    const cur = this.piece.type;
+    if (this.hold) { const h = this.hold; this.hold = cur; this.spawn(h); }
+    else { this.hold = cur; this.spawn(); }
+    this.canHold = false;
+  },
+
+  hardDrop() {
+    const p = this.piece;
+    if (!p || this.state !== 'playing') return;
+    const d = this.hardDropDistance();
+    p.y += d; this.score += d * 2;
+    p.rotated = p.rotated || false;
+    this.lock();
+  },
+
+  rotate(dir) {
+    const p = this.piece; if (!p || this.state !== 'playing') return;
+    const before = { x: p.x, y: p.y, rot: p.rot };
+    const ok = this.tryRotate(dir);
+    if (ok) {
+      p.rotated = true;
+      p.lastKick = (p.x - before.x) !== 0 || (p.y - before.y) !== 0 ? [p.x - before.x, p.y - before.y] : null;
+    }
+  },
+
+  start() {
+    this.reset();
+    this.state = 'playing';
+    this.startedAt = performance.now();
+    this.spawn();
+    UI.center(false);
+  },
+  togglePause() {
+    if (this.state === 'playing') { this.state = 'paused'; UI.center(true, 'PAUSED', 'Press P to resume'); }
+    else if (this.state === 'paused') { this.state = 'playing'; UI.center(false); }
+  },
+  gameOver() {
+    this.state = 'over';
+    saveBest(this.best);
+    this.shake = 1; this.energy = 1.0;
+    UI.center(true, 'GAME OVER', this.score.toLocaleString() + ' pts · press R to restart');
+  }
+};
+/* ============================================================
+   STEP 4 — layout, HUD, input (DAS/ARR), effects
+   ============================================================ */
+const $ = id => document.getElementById(id);
+const UI = {
+  el: {},
+  toastTimer: 0,
+  init() {
+    for (const k of ['v-score','v-best','v-lines','v-level','v-time','v-combo','v-b2b','v-pps',
+                     'center','center-big','center-sub','toast','fps','p-hold','p-stats','p-next','p-help','brand'])
+      this.el[k] = $(k);
+    this.el['v-best'].textContent = (Game.best = loadBest()).toLocaleString();
+  },
+  toast(msg) {
+    if (msg) this.queue.push(msg);
+  },
+  queue: [],
+  tickToast(dt) {
+    const t = this.el.toast;
+    if (this.toastTimer > 0) {
+      this.toastTimer -= dt;
+      if (this.toastTimer <= 0) t.classList.remove('show');
+      return;
+    }
+    if (this.queue.length) {
+      t.textContent = this.queue.shift();
+      t.classList.add('show');
+      this.toastTimer = 1.1;
+    }
+  },
+  center(show, big, sub) {
+    const c = this.el.center;
+    if (!show) { c.classList.add('hidden'); return; }
+    c.classList.remove('hidden');
+    if (big) this.el['center-big'].textContent = big;
+    if (sub) this.el['center-sub'].textContent = sub;
+  },
+  sync() {
+    const e = this.el;
+    e['v-score'].textContent = Game.score.toLocaleString();
+    e['v-best'].textContent = Math.max(Game.best, Game.score).toLocaleString();
+    e['v-lines'].textContent = Game.lines;
+    e['v-level'].textContent = Game.level;
+    const s = Math.floor(Game.elapsed);
+    e['v-time'].textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    e['v-combo'].textContent = Game.combo > 0 ? 'x' + (Game.combo + 1) : '—';
+    e['v-b2b'].textContent = Game.b2b > 0 ? 'x' + Game.b2b : '—';
+    const pps = Game.stats.seconds > 0.5 ? Game.stats.pieces / Game.stats.seconds : 0;
+    e['v-pps'].textContent = pps.toFixed(1);
+  }
+};
+
+function loadBest() { try { return parseInt(localStorage.getItem('quadra.best') || '0', 10) || 0; } catch (e) { return 0; } }
+function saveBest(v) { try { localStorage.setItem('quadra.best', String(v | 0)); } catch (e) {} }
+
+// ---------- layout ----------
+const Layout = { cell: 24, bx: 0, by: 0, bw: 0, bh: 0, ox: 0, oy: 0, slots: {} };
+function layout() {
+  const W = GL.width, H = GL.height;
+  const compact = W < 700;
+  const pad = compact ? 10 : 18;
+  const topBar = 46;
+  const sideW = compact ? 0 : 168;
+  const availH = H - pad * 2 - topBar;
+  const availW = W - pad * 2 - sideW * 2;
+  let cell = Math.floor(Math.min(availW / COLS, availH / ROWS));
+  cell = Math.max(12, Math.min(cell, 44));
+  Layout.cell = cell;
+  Layout.bw = cell * COLS; Layout.bh = cell * ROWS;
+  Layout.bx = Math.round((W - Layout.bw) / 2);
+  Layout.by = Math.round(topBar + (H - topBar - Layout.bh) / 2);
+
+  const place = (id, x, y, w, h) => {
+    const el = $(id);
+    if (!el) return;
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    if (w) el.style.width = w + 'px';
+    el.style.display = (x === -1) ? 'none' : '';
+  };
+  if (compact) {
+    for (const id of ['p-hold','p-stats','p-next','p-help']) place(id, -1);
+    UI.el.brand.style.fontSize = '11px';
+  } else {
+    UI.el.brand.style.fontSize = '';
+    const gap = 16, vg = 14;
+    const lx = Layout.bx - gap - sideW, rx = Layout.bx + Layout.bw + gap;
+    // left column: hold, stats
+    place('p-hold', lx, Layout.by, sideW);
+    const hh = $('p-hold').offsetHeight || 96;
+    place('p-stats', lx, Layout.by + hh + vg, sideW);
+    // right column: next, help
+    place('p-next', rx, Layout.by, sideW);
+    const nh = $('p-next').offsetHeight || 330;
+    place('p-help', rx, Layout.by + nh + vg, sideW);
+  }
+  // mini-preview rects (CSS px) inside the slots
+  const slotRect = (id, count) => {
+    const el = $(id);
+    if (!el || el.style.display === 'none' || !el.clientWidth) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.left, y: r.top + 4, w: r.width, h: (r.height - 8) / count, count };
+  };
+  Layout.slots.hold = slotRect('hold-slot', 1);
+  Layout.slots.next = slotRect('next-slot', 5);
+}
+
+// ---------- drawing ----------
+function cellQuad(gx, gy, type, alpha, glow) {
+  const c = PAL[type]; if (!c) return;
+  const s = Layout.cell;
+  GL.quad(Layout.bx + gx * s + 1 + Layout.ox, Layout.by + gy * s + 1 + Layout.oy, s - 2, s - 2, c[0], c[1], c[2], alpha, glow);
+}
+function miniPiece(type, rect, dim) {
+  if (!type || !ROT[type] || !rect || rect.w <= 0) return;
+  const cells = ROT[type][0];
+  let minX = 9, maxX = -9, minY = 9, maxY = -9;
+  for (const [x, y] of cells) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+  const w = maxX - minX + 1, h = maxY - minY + 1;
+  const s = Math.min((rect.w - 18) / w, (rect.h - 10) / h, 22);
+  const ox = rect.x + (rect.w - s * w) / 2, oy = rect.y + (rect.h - s * h) / 2;
+  const c = PAL[type];
+  const k = dim ? 0.42 : 1;
+  for (const [x, y] of cells) {
+    GL.quad(ox + (x - minX) * s + 1, oy + (y - minY) * s + 1, s - 2, s - 2,
+            c[0] * k, c[1] * k, c[2] * k, dim ? 0.75 : 1, dim ? 0.12 : 0.5);
+  }
+}
+// Ghost: each cell is an outlined block — a border-coloured quad with a faint
+// interior painted over it. No separate edge bars, so nothing can stub out
+// into stray "+" marks at junctions.
+function ghostShape(gx, gy, cells, type) {
+  const s = Layout.cell, t = Math.max(2, s * 0.10);
+  const c = PAL[type];
+  for (const [cx, cy] of cells) {
+    const X = gx + cx, Y = gy + cy;
+    if (Y < 0) continue;
+    const x = Layout.bx + X * s + Layout.ox + 1, y = Layout.by + Y * s + Layout.oy + 1, w = s - 2;
+    GL.quad(x, y, w, w, c[0], c[1], c[2], 0.40, 0.0);
+    GL.quad(x + t, y + t, w - 2 * t, w - 2 * t, c[0] * 0.35, c[1] * 0.35, c[2] * 0.35, 0.16, 0.0);
+  }
+}
+
+function render(time) {
+  const sh = Game.shake;
+  const sx = sh > 0.001 ? (Math.random() - 0.5) * sh * 14 : 0;
+  const sy = sh > 0.001 ? (Math.random() - 0.5) * sh * 14 : 0;
+  GL.beginFrame(time, Game.energy, Game.elapsed * 0.15);
+
+  const { cell: s, bx, by, bw, bh } = Layout;
+  Layout.ox = sx; Layout.oy = sy;
+  const X = bx + sx, Y = by + sy;
+
+  // board backdrop (opaque well so the animated background doesn't bleed through)
+  GL.quad(X - 10, Y - 10, bw + 20, bh + 20, 0.035, 0.06, 0.115, 0.94, 0.0);
+  GL.quad(X - 3,  Y - 3,  bw + 6,  bh + 6,  0.07, 0.13, 0.23, 0.92, 0.05);
+
+  // grid (thin quads lose ~50% coverage in the SDF, so compensate)
+  const gl_ = 0.30;
+  for (let x = 1; x < COLS; x++) GL.quad(X + x * s - 0.5, Y, 1, bh, 0.42, 0.68, 0.95, gl_, 0);
+  for (let y = 1; y < ROWS; y++) GL.quad(X, Y + y * s - 0.5, bw, 1, 0.42, 0.68, 0.95, gl_, 0);
+
+  // danger zone marker
+  GL.quad(X, Y, bw, 2, 1.0, 0.25, 0.35, 0.30, 0.2);
+
+  // settled stack
+  for (let y = HIDDEN; y < TOTAL; y++) {
+    for (let x = 0; x < COLS; x++) {
+      const ci = Game.board[y * COLS + x];
+      if (ci) cellQuad(x, y - HIDDEN, TYPES[ci - 1], 1, 0.42);
+    }
+  }
+
+  // clear flash
+  for (const f of Game.clearFlash) {
+    const k = 1 - f.t / 0.32;
+    GL.quad(X, Y + (f.row - HIDDEN) * s, bw, s, 1, 1, 1, k * 0.85, k * 1.4);
+  }
+
+  if (Game.piece && Game.state !== 'over') {
+    const p = Game.piece;
+    const gy = Game.ghostY();
+    if (gy > p.y) ghostShape(p.x, gy, Game.cells(p), p.type);
+    const near = Game.grounded ? 0.85 + 0.15 * Math.sin(time * 22) : 1;
+    for (const [cx, cy] of Game.cells(p)) {
+      const yy = p.y + cy;
+      if (yy >= HIDDEN) cellQuad(p.x + cx, yy - HIDDEN, p.type, near, Game.grounded ? 0.75 : 0.5);
+    }
+  }
+
+  // particles
+  for (const q of Game.particles) {
+    const k = 1 - q.age / q.life;
+    const size = Math.max(2, s * 0.28 * k);
+    GL.quad(X + q.x * s - size / 2, Y + (q.y - HIDDEN) * s - size / 2, size, size, q.c[0], q.c[1], q.c[2], k * 0.95, k * 0.8);
+  }
+
+  // previews
+  if (Layout.slots.hold) miniPiece(Game.hold || '—', Layout.slots.hold, !Game.canHold);
+  if (Layout.slots.next) {
+    for (let i = 0; i < Math.min(5, Game.queue.length); i++) {
+      const r = Layout.slots.next;
+      miniPiece(Game.queue[i], { x: r.x, y: r.y + r.h * i, w: r.w, h: r.h }, i > 0);
+    }
+  }
+
+  // frame border on top
+  const bt = 2;
+  const edge = Game.state === 'over' ? [1, 0.3, 0.4] : (Game.state === 'paused' ? [1, 0.8, 0.3] : [0.25, 0.85, 1.0]);
+  GL.quad(X - bt, Y - bt, bw + 2 * bt, bt, edge[0], edge[1], edge[2], 0.85, 0.9);
+  GL.quad(X - bt, Y + bh, bw + 2 * bt, bt, edge[0], edge[1], edge[2], 0.85, 0.9);
+  GL.quad(X - bt, Y - bt, bt, bh + 2 * bt, edge[0], edge[1], edge[2], 0.85, 0.9);
+  GL.quad(X + bw, Y - bt, bt, bh + 2 * bt, edge[0], edge[1], edge[2], 0.85, 0.9);
+}
+
+// ---------- input ----------
+const Keys = {
+  das: 0.11, arr: 0.022,
+  left:  { held: false, das: 0, arr: 0 },
+  right: { held: false, das: 0, arr: 0 }
+};
+
+function act(cmd) {
+  if (Game.state === 'ready' && cmd !== 'restart' && cmd !== 'pause') { Game.start(); return; }
+  if (Game.state === 'over' && cmd !== 'restart') return;
+  switch (cmd) {
+    case 'left':  Game.tryMove(-1, 0); break;
+    case 'right': Game.tryMove(1, 0); break;
+    case 'down':  Game.softStep(); break;
+    case 'cw':    Game.rotate(1); break;
+    case 'ccw':   Game.rotate(-1); break;
+    case 'flip':  Game.rotate(2); break;
+    case 'hold':  Game.holdPiece(); break;
+    case 'drop':  Game.hardDrop(); break;
+    case 'pause': Game.togglePause(); break;
+    case 'restart': Game.start(); UI.center(false); break;
+  }
+}
+
+const MAP = {
+  ArrowLeft: 'left', ArrowRight: 'right', ArrowDown: 'down', ArrowUp: 'cw',
+  KeyA: 'flip', KeyZ: 'ccw', KeyX: 'cw', KeyC: 'hold', KeyV: 'hold',
+  Space: 'drop', KeyP: 'pause', Escape: 'pause', KeyR: 'restart', Enter: 'start'
+};
+
+window.addEventListener('keydown', ev => {
+  const cmd = MAP[ev.code];
+  if (!cmd) return;
+  ev.preventDefault();
+  if (cmd === 'start') { if (Game.state !== 'playing') Game.start(); return; }
+  if (ev.repeat) return;
+  act(cmd);
+  if (cmd === 'left' || cmd === 'right') {
+    Keys[cmd].held = true; Keys[cmd].das = 0; Keys[cmd].arr = 0;
+  }
+  if (cmd === 'down') Game.softDropping = true;
+}, { passive: false });
+
+window.addEventListener('keyup', ev => {
+  const cmd = MAP[ev.code];
+  if (!cmd) return;
+  if (cmd === 'left' || cmd === 'right') Keys[cmd].held = false;
+  if (cmd === 'down') Game.softDropping = false;
+});
+
+window.addEventListener('blur', () => {
+  Keys.left.held = Keys.right.held = false; Game.softDropping = false;
+  if (Game.state === 'playing') Game.togglePause();
+});
+
+function repeatInput(dt) {
+  for (const dir of ['left', 'right']) {
+    const k = Keys[dir];
+    if (!k.held || Game.state !== 'playing') continue;
+    k.das += dt;
+    if (k.das >= Keys.das) {
+      k.arr += dt;
+      while (k.arr >= Keys.arr) { k.arr -= Keys.arr; Game.tryMove(dir === 'left' ? -1 : 1, 0); }
+    }
+  }
+}
+
+// touch / pointer controls
+(() => {
+  let sx = 0, sy = 0, st = 0, moved = 0;
+  const c = GL.canvas;
+  c.addEventListener('pointerdown', e => { sx = e.clientX; sy = e.clientY; st = performance.now(); moved = 0; });
+  c.addEventListener('pointerup', e => {
+    const dx = e.clientX - sx, dy = e.clientY - sy, d = Math.hypot(dx, dy), dt = performance.now() - st;
+    if (Game.state !== 'playing') { act('start'); return; }
+    if (d < 24 && dt < 300) act('cw');
+    else if (d >= 24) {
+      if (Math.abs(dx) > Math.abs(dy)) act(dx > 0 ? 'right' : 'left');
+      else if (dy > 0 && dy > 60) act('drop');
+      else act('down');
+    }
+  });
+})();
+/* ============================================================
+   STEP 5 — main loop
+   ============================================================ */
+(function main() {
+  UI.init();
+  Game.reset();
+  layout();
+  window.addEventListener('resize', layout);
+
+  let last = performance.now();
+  let fpsAcc = 0, fpsFrames = 0, fpsShown = 0;
+
+  function tick(now) {
+    let dt = (now - last) / 1000;
+    last = now;
+    if (dt > 0.25) dt = 0.25;              // tab-switch guard
+    const t = now / 1000;
+
+    repeatInput(dt);
+    Game.update(dt);
+    UI.tickToast(dt);
+
+    render(t);
+    GL.endFrame();
+    UI.sync();
+
+    fpsAcc += dt; fpsFrames++;
+    if (fpsAcc >= 0.5) {
+      fpsShown = Math.round(fpsFrames / fpsAcc);
+      UI.el.fps.textContent = fpsShown + ' fps · WebGL';
+      fpsAcc = 0; fpsFrames = 0;
+    }
+    requestAnimationFrame(tick);
+  }
+
+  UI.center(true, 'TETRIS', 'Press Enter to start');
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
