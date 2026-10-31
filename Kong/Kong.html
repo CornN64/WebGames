@@ -539,25 +539,25 @@ function levelTwo() {
 function levelThree() {
   const surfaces = [
     Girder(8, 496, 438, 496),      // ground
-    Girder(10, 180, 323, 180),     // Kong's deck
-    Girder(174, 116, 263, 116),    // Pauline's platform
-    Girder(10, 273, 58, 273),      // upper-left ledge
-    Girder(113, 273, 173, 273),    // long central-left ledge
-    Girder(10, 382, 54, 382),      // lower-left ledge
-    Girder(128, 415, 173, 415),    // central ledge
-    Girder(248, 256, 293, 256),    // first right-hand step
-    Girder(308, 243, 338, 243),
-    Girder(353, 224, 383, 224),
-    Girder(398, 211, 428, 211),
-    Girder(353, 274, 383, 274),
-    Girder(308, 336, 338, 336),
-    Girder(353, 349, 383, 349),
-    Girder(398, 367, 428, 367),
-    Girder(398, 418, 428, 418),
-    Girder(338, 432, 368, 432),
-    Girder(293, 448, 323, 448),    // player start ledge
-    Girder(383, 448, 428, 448),
-    Girder(248, 459, 278, 459),
+    Girder(10, 180, 331, 180),     // Kong's deck
+    Girder(180, 116, 270, 116),    // Pauline's platform
+    Girder(10, 273, 55, 273),
+    Girder(116, 273, 179, 273),
+    Girder(10, 382, 55, 382),
+    Girder(116, 420, 179, 420),
+    Girder(254, 256, 300, 256),
+    Girder(254, 292, 300, 292),
+    Girder(314, 242, 347, 242),
+    Girder(362, 224, 393, 224),
+    Girder(407, 211, 436, 211),
+    Girder(362, 292, 414, 292),
+    Girder(314, 310, 346, 310),
+    Girder(362, 352, 400, 352),
+    Girder(407, 370, 436, 370),
+    Girder(393, 420, 436, 420),
+    Girder(346, 430, 378, 430),
+    Girder(300, 447, 332, 447),    // player start ledge
+    Girder(239, 461, 284, 461),
   ];
   const ladder = (x, yTop, yBottom) => ({
     x, yTop, yBottom, broken: false, effBottom: yBottom,
@@ -566,8 +566,8 @@ function levelThree() {
     girders: surfaces,
     platform: surfaces[2],
     style: 3,
-    startX: 308,
-    startGirder: 17,
+    startX: 20,
+    startGirder: 0,
     kongGirder: 1,
     barrelGirder: 1,
     hammerPositions: [],
@@ -582,19 +582,18 @@ function levelThree() {
     ladders: [
       Object.assign(ladder(129, 68, 180), { decorative: true }),
       Object.assign(ladder(158, 68, 180), { decorative: true }),
-      ladder(249, 116, 180),
-      ladder(39, 273, 382),
-      ladder(31, 382, 496),
-      ladder(137, 273, 415),
-      ladder(166, 273, 415),
-      ladder(262, 256, 459),
-      ladder(308, 180, 243),
-      ladder(368, 224, 274),
-      ladder(414, 211, 367),
-      ladder(368, 274, 349),
-      ladder(414, 367, 418),
-      ladder(353, 349, 432),
-      ladder(308, 336, 448),
+      ladder(260, 116, 180),
+      ladder(40, 273, 382),
+      ladder(24, 382, 496),
+      ladder(137, 273, 420),
+      ladder(166, 273, 420),
+      ladder(323, 180, 242),
+      ladder(380, 224, 292),
+      ladder(414, 211, 292),
+      ladder(277, 256, 292),
+      ladder(369, 292, 352),
+      ladder(414, 370, 420),
+      ladder(369, 352, 430),
     ],
   };
 }
@@ -2144,15 +2143,11 @@ function update() {
 
     case 'complete':
       if (G.modeT > 190) {
-        if (G.level >= levelLayouts.length) {
-          setMode('win');
-        } else {
-          G.level++;
-          G.difficulty = 1 + G.level * 0.35;
-          buildLevel(G.level);
-          resetLevel(false);
-          setMode('ready');
-        }
+        G.level = G.level >= levelLayouts.length ? 1 : G.level + 1;
+        G.difficulty = 1 + G.level * 0.35;
+        buildLevel(G.level);
+        resetLevel(false);
+        setMode('ready');
       }
       break;
 
