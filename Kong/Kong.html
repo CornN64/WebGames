@@ -274,6 +274,21 @@ function drawLevelFourMachinery() {
       [255, 168 - flicker * 8, 40, 0.85 - flicker * 0.07]);
   }
 }
+function drawConveyorBelts() {
+  for (const belt of G.conveyors) {
+    const surface = belt.surface;
+    for (let x = surface.x1 + 12; x < surface.x2 - 7; x += 22) {
+      const dir = belt.mode === 'center'
+        ? (x < belt.center ? 1 : -1)
+        : belt.dir;
+      const y = surface.yAt(x) + 10;
+      const tip = x + dir * 4;
+      rotRect(x, y, 8, 2, 0, [255, 216, 144]);
+      rotRect(tip - dir * 2, y - 2, 5, 2, dir > 0 ? -0.75 : 0.75, [255, 216, 144]);
+      rotRect(tip - dir * 2, y + 2, 5, 2, dir > 0 ? 0.75 : -0.75, [255, 216, 144]);
+    }
+  }
+}
 function drawElevators() {
   for (const elevator of G.elevators) {
     rect(elevator.x1 + (elevator.x2 - elevator.x1) / 2 - 1, elevator.trackTop, 3,
@@ -560,18 +575,22 @@ function levelThree() {
       { x1: 69, x2: 99, trackTop: 180, trackBottom: 496, top: 273, bottom: 479, y: 479, dir: -1, speed: 0.42 },
       { x1: 188, x2: 218, trackTop: 180, trackBottom: 496, top: 273, bottom: 415, y: 377, dir: 1, speed: 0.42 },
     ],
+    itemPositions: [
+      { x: 405, y: 201, kind: 'purse', val: 300 },
+      { x: 382, y: 292, kind: 'umbrella', val: 300 },
+    ],
     ladders: [
-      ladder(129, 68, 180),
-      ladder(158, 68, 180),
-      ladder(249, 132, 180),
+      Object.assign(ladder(129, 68, 180), { decorative: true }),
+      Object.assign(ladder(158, 68, 180), { decorative: true }),
+      ladder(249, 116, 180),
       ladder(39, 273, 382),
-      ladder(31, 398, 471),
-      ladder(137, 287, 415),
-      ladder(166, 287, 415),
-      ladder(262, 273, 321),
+      ladder(31, 382, 496),
+      ladder(137, 273, 415),
+      ladder(166, 273, 415),
+      ladder(262, 256, 459),
       ladder(308, 180, 243),
       ladder(368, 224, 274),
-      ladder(414, 211, 287),
+      ladder(414, 211, 367),
       ladder(368, 274, 349),
       ladder(414, 367, 418),
       ladder(353, 349, 432),
@@ -602,31 +621,39 @@ function levelFour() {
     startGirder: 0,
     kongGirder: 1,
     barrelGirder: 1,
-    hammerPositions: [],
+    hammerPositions: [
+      { x: 42, y: 297 },
+      { x: 216, y: 376 },
+    ],
     endCappedGirders: [1, 3, 7],
+    firebin: { x: 210, y: 216, w: 28, h: 64 },
+    fireballGirders: [0, 1, 3, 7],
     itemPositions: [
-      { x: 42, y: 286, kind: 'hat', val: 300 },
+      { x: 125, y: 327, kind: 'hat', val: 300 },
       { x: 410, y: 318, kind: 'umbrella', val: 300 },
       { x: 249, y: 478, kind: 'purse', val: 300 },
     ],
+    conveyorBelts: [
+      { girderIndex: 7, mode: 'reverse', dir: 1, speed: 0.55, period: 240 },
+      { girderIndex: 3, mode: 'center', center: 224, speed: 0.65 },
+      { girderIndex: 1, mode: 'reverse', dir: -1, speed: 0.55, period: 240, phase: 120 },
+    ],
     ladders: [
-      ladder(129, 68, 180),
-      ladder(159, 68, 180),
-      ladder(248, 132, 180),
-      ladder(39, 200, 260),
-      ladder(383, 200, 260),
-      ladder(54, 280, 331),
-      ladder(158, 280, 331),
-      ladder(263, 280, 331),
-      ladder(368, 280, 331),
-      ladder(54, 351, 414),
-      ladder(131, 351, 414),
-      ladder(263, 351, 414),
-      ladder(368, 351, 414),
-      ladder(54, 434, 492),
-      ladder(159, 434, 492),
-      ladder(263, 434, 492),
-      ladder(368, 434, 492),
+      Object.assign(ladder(129, 68, 180), { decorative: true }),
+      Object.assign(ladder(159, 68, 180), { decorative: true }),
+      ladder(248, 116, 180),
+      ladder(39, 180, 260),
+      ladder(383, 180, 260),
+      ladder(54, 260, 331),
+      ladder(158, 260, 331),
+      ladder(263, 260, 331),
+      ladder(368, 260, 331),
+      ladder(145, 331, 414),
+      ladder(247, 331, 414),
+      ladder(49, 414, 492),
+      ladder(173, 414, 492),
+      ladder(278, 414, 492),
+      ladder(352, 414, 492),
     ],
   };
 }
@@ -966,6 +993,7 @@ const G = {
   player: null, kong: null,
   barrels: [], fireballs: [], hammers: [], items: [], floats: [], parts: [],
   elevators: [],
+  conveyors: [],
   rivets: [], collapseStarted: false, collapseTime: 0,
   spawnT: 0, fireT: 0,
   difficulty: 1,
@@ -997,7 +1025,12 @@ function resetLevel(full) {
     elevator: true,
     yAt() { return this.y; },
   })) : [];
-  G.spawnT = 90; G.fireT = activeLayout.style === 2 ? 80 : activeLayout.style === 4 ? Infinity : 260;
+  G.conveyors = (activeLayout.conveyorBelts || []).map(belt => ({
+    ...belt,
+    surface: girders[belt.girderIndex],
+    elapsed: belt.phase || 0,
+  }));
+  G.spawnT = 90; G.fireT = activeLayout.style === 2 ? 80 : activeLayout.style === 4 ? 120 : 260;
   G.rivets = [];
   G.collapseStarted = false;
   G.collapseTime = 0;
@@ -1049,14 +1082,36 @@ function spawnBarrel() {
 function spawnFireball(fromBarrel) {
   if (G.fireballs.length >= 3) return;
   if (activeLayout.style === 2) {
-    const gi = Math.floor(Math.random() * activeLayout.rivetGirders.length);
-    const floorIndex = activeLayout.rivetGirders[gi];
-    const g = girders[floorIndex];
-    const x = g.x1 + 20 + Math.random() * (g.x2 - g.x1 - 40);
+    const minSpawnDistance = 140;
+    const playerX = G.player.x;
+    const playerY = G.player.y + PH / 2;
+    let floorIndex, x, y;
+    for (let attempt = 0; attempt < 24; attempt++) {
+      floorIndex = activeLayout.rivetGirders[Math.floor(Math.random() * activeLayout.rivetGirders.length)];
+      const surface = girders[floorIndex];
+      x = surface.x1 + 20 + Math.random() * (surface.x2 - surface.x1 - 40);
+      y = surface.yAt(x) - 10;
+      if (Math.hypot(x - playerX, y + 5 - playerY) >= minSpawnDistance) break;
+      floorIndex = null;
+    }
+    if (floorIndex == null) return;
     G.fireballs.push({
-      x, y: g.yAt(x) - 10, vx: 0.75 + 0.08 * G.difficulty,
+      x, y, vx: 0.75 + 0.08 * G.difficulty,
       dir: G.player.x < x ? -1 : 1, floorIndex, climbTarget: null,
       climbDir: -1, climbToFloor: floorIndex, anim: 0, waitT: 0, dead: false,
+    });
+    SFX.fireball();
+    return;
+  }
+  if (activeLayout.style === 4) {
+    const gi = activeLayout.fireballGirders[Math.floor(Math.random() * activeLayout.fireballGirders.length)];
+    const surface = girders[gi];
+    const x = surface.x1 + 12 + Math.random() * Math.max(1, surface.x2 - surface.x1 - 24);
+    G.fireballs.push({
+      x, y: surface.yAt(x) - 10, vx: 0, vy: 0,
+      chaseSpeed: 0.48 + 0.08 * G.difficulty,
+      floorIndex: gi, climbTarget: null, climbDir: -1, climbToFloor: gi, waitT: 0,
+      anim: 0, dead: false,
     });
     SFX.fireball();
     return;
@@ -1139,6 +1194,10 @@ function fireballStep(f) {
     levelTwoFireballStep(f);
     return;
   }
+  if (activeLayout.style === 4) {
+    levelFourFireballStep(f);
+    return;
+  }
   if (f.waitT > 0) { f.waitT--; return; }
   if (f.climbTarget) {
     const l = f.climbTarget;
@@ -1171,6 +1230,126 @@ function fireballStep(f) {
     }
   }
   if (f.x < -20 || f.x > VW + 20 || f.y > VH + 30) f.dead = true;
+}
+
+function levelFourFloorAt(x, feetY) {
+  let bestIndex = null;
+  let bestDistance = Infinity;
+  for (let i = 0; i < girders.length; i++) {
+    const g = girders[i];
+    if (x < g.x1 - 1 || x > g.x2 + 1) continue;
+    const distance = Math.abs(g.yAt(x) - feetY);
+    if (distance < bestDistance) {
+      bestIndex = i;
+      bestDistance = distance;
+    }
+  }
+  return bestDistance <= 42 ? bestIndex : null;
+}
+
+function levelFourFloorAtLadderEnd(ladder, y) {
+  for (let i = 0; i < girders.length; i++) {
+    const g = girders[i];
+    if (ladder.x >= g.x1 - 1 && ladder.x <= g.x2 + 1 &&
+        Math.abs(g.yAt(ladder.x) - y) <= 4) return i;
+  }
+  return null;
+}
+
+function levelFourRoute(fromFloor, toFloor) {
+  if (fromFloor == null || toFloor == null || fromFloor === toFloor) return null;
+  const links = [];
+  for (const ladder of ladders) {
+    if (ladder.decorative || ladder.broken) continue;
+    const topFloor = levelFourFloorAtLadderEnd(ladder, ladder.yTop);
+    const bottomFloor = levelFourFloorAtLadderEnd(ladder, ladder.yBottom);
+    if (topFloor != null && bottomFloor != null && topFloor !== bottomFloor) {
+      links.push({ ladder, topFloor, bottomFloor });
+    }
+  }
+
+  const queue = [{ floor: fromFloor, first: null }];
+  const seen = new Set([fromFloor]);
+  for (let i = 0; i < queue.length; i++) {
+    const current = queue[i];
+    for (const link of links) {
+      const nextFloor = current.floor === link.topFloor
+        ? link.bottomFloor
+        : current.floor === link.bottomFloor
+          ? link.topFloor
+          : null;
+      if (nextFloor == null || seen.has(nextFloor)) continue;
+      const step = current.first || {
+        ladder: link.ladder,
+        climbDir: current.floor === link.topFloor ? 1 : -1,
+        targetFloor: nextFloor,
+      };
+      if (nextFloor === toFloor) return step;
+      seen.add(nextFloor);
+      queue.push({ floor: nextFloor, first: step });
+    }
+  }
+  return null;
+}
+
+function levelFourPlayerFloor() {
+  const p = G.player;
+  if (p.climbing) {
+    const topFloor = levelFourFloorAtLadderEnd(p.climbing, p.climbing.yTop);
+    const bottomFloor = levelFourFloorAtLadderEnd(p.climbing, p.climbing.yBottom);
+    if (keys.up && topFloor != null) return topFloor;
+    if (keys.down && bottomFloor != null) return bottomFloor;
+    return Math.abs(p.y + PH - p.climbing.yTop) <= Math.abs(p.y + PH - p.climbing.yBottom)
+      ? topFloor
+      : bottomFloor;
+  }
+  if (p.onGround) {
+    const surface = surfaceBelow(p.x, p.y + PH - 3, 8);
+    if (surface) return girders.indexOf(surface.g);
+  }
+  return levelFourFloorAt(p.x, p.y + PH);
+}
+
+function levelFourFireballStep(f) {
+  f.x = Math.max(0, Math.min(VW - 12, f.x));
+  if (f.waitT > 0) { f.waitT--; return; }
+
+  if (f.climbTarget) {
+    const ladder = f.climbTarget;
+    f.x = ladder.x - 6;
+    const targetY = (f.climbDir < 0 ? ladder.yTop : ladder.yBottom) - 10;
+    f.y += f.climbDir * f.chaseSpeed;
+    if ((f.climbDir < 0 && f.y <= targetY) ||
+        (f.climbDir > 0 && f.y >= targetY)) {
+      f.y = targetY;
+      f.floorIndex = f.climbToFloor;
+      f.climbTarget = null;
+      f.waitT = 4;
+    }
+    return;
+  }
+
+  const targetFloor = levelFourPlayerFloor();
+  if (targetFloor != null && targetFloor !== f.floorIndex) {
+    const route = levelFourRoute(f.floorIndex, targetFloor);
+    if (route) {
+      const ladder = route.ladder;
+      const dx = ladder.x - (f.x + 6);
+      f.x += Math.sign(dx) * Math.min(Math.abs(dx), f.chaseSpeed);
+      f.y = girders[f.floorIndex].yAt(f.x + 6) - 10;
+      if (Math.abs(dx) <= f.chaseSpeed + 0.5) {
+        f.x = ladder.x - 6;
+        f.climbTarget = ladder;
+        f.climbDir = route.climbDir;
+        f.climbToFloor = route.targetFloor;
+      }
+      return;
+    }
+  }
+
+  const dx = G.player.x - (f.x + 6);
+  f.x += Math.sign(dx) * Math.min(Math.abs(dx), f.chaseSpeed);
+  f.y = girders[f.floorIndex].yAt(f.x + 6) - 10;
 }
 
 function levelTwoFireballStep(f) {
@@ -1242,7 +1421,7 @@ function tryPickup(p) {
     }
   }
   for (const it of G.items) {
-    if (it.dead) continue;
+    if (it.dead || it.collectible === false) continue;
     if (Math.abs(it.x - p.x) < 14 && Math.abs(it.y - (p.y + PH / 2)) < 16) {
       it.dead = true;
       addScore(it.val, it.x, it.y - 10, '');
@@ -1419,6 +1598,7 @@ function updatePlayer(p) {
 
   if (p.y > VH + 40) return kill('fell');
 
+  applyConveyorMotion(p);
   tryPickup(p);
 }
 
@@ -1491,6 +1671,37 @@ function updateElevators() {
     if (p.standingOn === elevator) p.y += elevator.y - previousY;
   }
 }
+function updateConveyors() {
+  for (const belt of G.conveyors) {
+    if (belt.mode !== 'reverse') continue;
+    belt.elapsed++;
+    if (belt.elapsed >= belt.period) {
+      belt.elapsed = 0;
+      belt.dir *= -1;
+    }
+  }
+}
+function applyConveyorMotion(p) {
+  if (!p.onGround || p.climbing) return;
+  const delta = conveyorDeltaAt(p.x, p.y + PH);
+  if (delta) p.x = Math.max(8, Math.min(VW - 8, p.x + delta));
+}
+function conveyorDeltaAt(x, feetY) {
+  for (const belt of G.conveyors) {
+    const surface = belt.surface;
+    if (x < surface.x1 || x > surface.x2 ||
+        Math.abs(feetY - surface.yAt(x)) > 2) continue;
+    const dir = belt.mode === 'center'
+      ? Math.sign(belt.center - x)
+      : belt.dir;
+    return dir * belt.speed;
+  }
+  return 0;
+}
+function applyConveyorMotionToKong(k) {
+  const delta = conveyorDeltaAt(k.x, k.y + 30);
+  if (delta) k.x = Math.max(16, Math.min(VW - 16, k.x + delta));
+}
 
 /* ============================================================
    KONG
@@ -1499,6 +1710,7 @@ function updateKong(k) {
   k.anim += 0.05;
   if (k.armT > 0) k.armT--;
   if (G.mode !== 'play') return;
+  applyConveyorMotionToKong(k);
   if (activeLayout.style !== 1 && activeLayout.style !== 3) {
     k.face = G.player.x < k.x ? -1 : 1;
     return;
@@ -1533,6 +1745,8 @@ function checkHits() {
   if (G.mode !== 'play' || p.invuln > 0) return;
   const pb = playerHit(p);
   const hb = p.swing > 0 ? swingHit(p) : null;
+
+  if (activeLayout.firebin && overlap(pb, activeLayout.firebin)) return kill('firebin');
 
   for (const b of G.barrels) {
     if (b.dead) continue;
@@ -1797,9 +2011,11 @@ function drawItem(it) {
   if (it.dead) return;
   const b = Math.sin(G.t * 4 + it.x) * 1.5;
   if (it.kind === 'purse') {
-    rect(it.x - 8, it.y - 6 + b, 16, 12, COL.fire1);
-    rect(it.x - 8, it.y - 6 + b, 16, 2, COL.white);
-    rect(it.x - 2, it.y - 9 + b, 4, 3, COL.fire2);
+    rect(it.x - 8, it.y - 5 + b, 16, 11, [216, 40, 184]);
+    rect(it.x - 8, it.y - 5 + b, 16, 2, [248, 136, 232]);
+    rect(it.x - 4, it.y - 8 + b, 8, 3, [248, 136, 232]);
+    rect(it.x - 2, it.y - 2 + b, 4, 5, [255, 216, 248]);
+    rect(it.x - 6, it.y + 4 + b, 12, 2, [144, 32, 152]);
   } else if (it.kind === 'umbrella') {
     rect(it.x - 10, it.y - 7 + b, 20, 3, [248, 64, 192]);
     rect(it.x - 8, it.y - 10 + b, 16, 3, [248, 136, 224]);
@@ -1814,6 +2030,16 @@ function drawItem(it) {
     rect(it.x - 3, it.y - 8 + b, 6, 2, [255, 224, 120]);
     rect(it.x - 5, it.y - 3 + b, 2, 2, COL.white);
     rect(it.x - 9, it.y + 1 + b, 18, 2, [255, 224, 120]);
+  } else if (it.kind === 'spring') {
+    const pulse = Math.sin(G.t * 6 + it.x) * 2;
+    rect(it.x - 5, it.y - 17 + pulse, 10, 4, [112, 88, 160]);
+    rect(it.x - 7, it.y - 13 + pulse, 14, 3, [200, 200, 232]);
+    for (let i = 0; i < 4; i++) {
+      const y = it.y - 10 + pulse + i * 6;
+      rect(it.x - 6, y, 12, 2, i % 2 ? [72, 104, 232] : [232, 64, 72]);
+      rect(it.x - 2, y + 2, 4, 2, [216, 216, 232]);
+    }
+    rect(it.x - 8, it.y + 13 + pulse, 16, 4, [112, 88, 160]);
   } else {
     rect(it.x - 5, it.y - 5 + b, 10, 10, COL.clear);
     rect(it.x - 2, it.y - 2 + b, 4, 4, COL.white);
@@ -1869,6 +2095,7 @@ function update() {
         G.bonus = Math.max(0, G.bonus - 100);
         if (G.bonus > 0 && G.bonus % 500 === 0) SFX.bonus();
       }
+      updateConveyors();
       updateElevators();
       updatePlayer(G.player);
       if (G.mode !== 'play') break;
@@ -1886,10 +2113,12 @@ function update() {
         spawnBarrel();
         G.spawnT = (Math.max(48, 120 - G.level * 10) + Math.random() * 70) * BARREL_RATE;
       }
-      if (activeLayout.style !== 4 && --G.fireT <= 0) {
+      if (--G.fireT <= 0) {
         spawnFireball();
         G.fireT = activeLayout.style === 2
           ? 150 + Math.random() * 100
+          : activeLayout.style === 4
+            ? 300 + Math.random() * 180
           : Math.max(360, 900 - G.level * 60) + Math.random() * 300;
       }
       // reach Pauline
@@ -1972,6 +2201,7 @@ function render() {
   drawFallingChunks();
   drawElevators();
   drawLevelFourMachinery();
+  drawConveyorBelts();
   flush();
 
   // pass 3: entities
