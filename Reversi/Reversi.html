@@ -77,6 +77,12 @@ h1{color:#4a4a4a;margin-bottom:10px}
 
 #info{margin-top:15px;font-size:18px}
 #controls{margin-top:12px;display:flex;gap:10px;align-items:center}
+#controls label{font-size:.95rem;color:#bbb}
+#difficulty{
+  padding:9px 12px;font-size:.95rem;background:#333;color:#fff;
+  border:1px solid #555;border-radius:8px
+}
+#difficulty:focus-visible{outline:2px solid #ffc107;outline-offset:2px}
 #hintToggle{
   padding:9px 18px;font-size:.95rem;font-weight:bold;letter-spacing:.3px;
   background:#333;color:#bbb;border:1px solid #555;border-radius:8px;cursor:pointer;
@@ -106,6 +112,12 @@ h1{color:#4a4a4a;margin-bottom:10px}
 <h1>Reversi</h1>
 <div id='board'></div>
 <div id='controls'>
+  <label for='difficulty'>Difficulty</label>
+  <select id='difficulty'>
+    <option value='easy'>Easy</option>
+    <option value='medium'>Medium</option>
+    <option value='hard'>Hard</option>
+  </select>
   <button id='hintToggle' type='button' aria-pressed='false'>Show my moves</button>
 </div>
 <div id='info'>Black: 2 | White: 2</div>
@@ -120,6 +132,17 @@ h1{color:#4a4a4a;margin-bottom:10px}
 const B=8;
 const DIRS=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
 const FLIP_MS=520, POP_MS=360, STAGGER=45;
+const POSITION_WEIGHTS=[
+  [120,-25,20,5,5,20,-25,120],
+  [-25,-45,-5,-5,-5,-5,-45,-25],
+  [20,-5,15,3,3,15,-5,20],
+  [5,-5,3,3,3,3,-5,5],
+  [5,-5,3,3,3,3,-5,5],
+  [20,-5,15,3,3,15,-5,20],
+  [-25,-45,-5,-5,-5,-5,-45,-25],
+  [120,-25,20,5,5,20,-25,120]
+];
+const SEARCH_DEPTH=4;
 
 let board=[],cur=1,over=false,busy=false,cells=[];
 let showMyMoves=false;
@@ -191,14 +214,14 @@ function updateHintToggle(){
   btn.textContent=showMyMoves?'Hide my moves':'Show my moves';
 }
 
-function isValid(r,c,p){
-  if(r<0||r>=B||c<0||c>=B||board[r][c]!==0)return false;
+function isValid(r,c,p,state=board){
+  if(r<0||r>=B||c<0||c>=B||state[r][c]!==0)return false;
   const opp=-p;
   for(const[dr,dc]of DIRS){
     let rr=r+dr,cc=c+dc,found=false;
     while(rr>=0&&rr<B&&cc>=0&&cc<B){
-      if(board[rr][cc]===opp)found=true;
-      else if(board[rr][cc]===p){if(found)return true;break;}
+      if(state[rr][cc]===opp)found=true;
+      else if(state[rr][cc]===p){if(found)return true;break;}
       else break;
       rr+=dr;cc+=dc;
     }
@@ -206,18 +229,111 @@ function isValid(r,c,p){
   return false;
 }
 
-function collectFlips(r,c,p){
+function collectFlips(r,c,p,state=board){
   const opp=-p,flips=[];
   for(const[dr,dc]of DIRS){
     let rr=r+dr,cc=c+dc,run=[];
     while(rr>=0&&rr<B&&cc>=0&&cc<B){
-      if(board[rr][cc]===opp)run.push([rr,cc]);
-      else if(board[rr][cc]===p){flips.push(...run);break;}
+      if(state[rr][cc]===opp)run.push([rr,cc]);
+      else if(state[rr][cc]===p){flips.push(...run);break;}
       else break;
       rr+=dr;cc+=dc;
     }
   }
   return flips;
+}
+
+function getMoves(state,p){
+  const moves=[];
+  for(let r=0;r<B;r++){
+    for(let c=0;c<B;c++){
+      if(isValid(r,c,p,state))moves.push({r,c});
+    }
+  }
+  return moves;
+}
+
+function playMove(state,move,p){
+  const next=state.map(row=>row.slice());
+  next[move.r][move.c]=p;
+  for(const[r,c]of collectFlips(move.r,move.c,p,state))next[r][c]=p;
+  return next;
+}
+
+function evaluatePosition(state,player){
+  let score=0,occupied=0,discs=0;
+  for(let r=0;r<B;r++){
+    for(let c=0;c<B;c++){
+      const piece=state[r][c];
+      if(piece!==0){
+        occupied++;
+        discs+=piece===player?1:-1;
+        score+=POSITION_WEIGHTS[r][c]*(piece===player?1:-1);
+      }
+    }
+  }
+  const mobility=getMoves(state,player).length-getMoves(state,-player).length;
+  const discWeight=occupied>48?4:0;
+  return score+mobility*8+discs*discWeight;
+}
+
+function searchPosition(state,player,depth,alpha,beta,computer){
+  const moves=getMoves(state,player);
+  if(moves.length===0){
+    const otherMoves=getMoves(state,-player);
+    if(otherMoves.length===0){
+      let difference=0;
+      for(const row of state){
+        for(const piece of row)if(piece!==0)difference+=piece===computer?1:-1;
+      }
+      return difference*10000;
+    }
+    return searchPosition(state,-player,depth,alpha,beta,computer);
+  }
+  if(depth===0)return evaluatePosition(state,computer);
+
+  moves.sort((a,b)=>POSITION_WEIGHTS[b.r][b.c]-POSITION_WEIGHTS[a.r][a.c]);
+  const maximizing=player===computer;
+  let best=maximizing?-Infinity:Infinity;
+  for(const move of moves){
+    const score=searchPosition(playMove(state,move,player),-player,depth-1,alpha,beta,computer);
+    if(maximizing){
+      best=Math.max(best,score);
+      alpha=Math.max(alpha,best);
+    }else{
+      best=Math.min(best,score);
+      beta=Math.min(beta,best);
+    }
+    if(beta<=alpha)break;
+  }
+  return best;
+}
+
+function chooseComputerMove(moves){
+  const difficulty=document.getElementById('difficulty').value;
+  if(difficulty==='easy')return moves[Math.floor(Math.random()*moves.length)];
+  if(difficulty==='medium'){
+    const scored=moves.map(move=>({
+      move,
+      score:evaluatePosition(playMove(board,move,-1),-1)
+    }));
+    const best=Math.max(...scored.map(option=>option.score));
+    const choices=scored.filter(option=>option.score===best);
+    return choices[Math.floor(Math.random()*choices.length)].move;
+  }
+
+  let best=-Infinity;
+  let choices=[];
+  for(const move of moves){
+    const score=searchPosition(playMove(board,move,-1),1,SEARCH_DEPTH-1,-Infinity,Infinity,-1);
+    if(score>best){
+      best=score;
+      choices=[move];
+    }else if(score===best){
+      choices.push(move);
+    }
+  }
+  return choices[Math.floor(Math.random()*choices.length)];
 }
 
 // Mutates the board and drives the placement pop + staggered flip ripple.
@@ -330,14 +446,9 @@ function hasValid(p){
 function computerMove(){
   setTimeout(()=>{
     if(over)return;
-    const valids=[];
-    for(let r=0;r<B;r++){
-      for(let c=0;c<B;c++){
-        if(isValid(r,c,-1))valids.push({r,c});
-      }
-    }
+    const valids=getMoves(board,-1);
     if(valids.length>0){
-      const pick=valids[Math.floor(Math.random()*valids.length)];
+      const pick=chooseComputerMove(valids);
       commitMove(pick.r,pick.c,-1);
     }
   },500);
