@@ -198,6 +198,12 @@ let staticCount = 0;
 function buildStatic() {
   qn = 0;
   for (const g of girders) drawGirder(g);
+  if (activeLayout.style === 2) {
+    const top = girders[activeLayout.kongGirder];
+    for (const x of activeLayout.supportXs) {
+      rect(x - 2, platform.y + GIRDER_H, 5, top.yAt(x) - platform.y - GIRDER_H, [0, 204, 255]);
+    }
+  }
   drawGirder(platform);
   for (const l of ladders) drawLadder(l);
   staticCount = qn;
@@ -211,6 +217,21 @@ function drawStatic() {
   gl.bindBuffer(gl.ARRAY_BUFFER, staticVBO);
   setPointers();
   gl.drawArrays(gl.TRIANGLES, 0, staticCount * VPQ);
+}
+function drawFallingChunks() {
+  if (activeLayout.style !== 2 || !G.collapseStarted) return;
+  const t = G.collapseTime;
+  for (const gi of activeLayout.rivetGirders) {
+    const g = girders[gi];
+    rect(activeLayout.centralLeft, g.yAt(activeLayout.centralLeft),
+      activeLayout.centralRight - activeLayout.centralLeft, GIRDER_H, COL.black);
+    const age = Math.max(0, t - (4 - gi) * 7);
+    const drop = Math.min(VH + 60, age * age * 0.012);
+    drawGirder(Girder(
+      activeLayout.centralLeft, g.yAt(activeLayout.centralLeft) + drop,
+      activeLayout.centralRight, g.yAt(activeLayout.centralRight) + drop
+    ));
+  }
 }
 
 /* ---------- palette ---------- */
@@ -373,10 +394,11 @@ function Girder(x1, y1, x2, y2) {
 }
 
 let girders = [], ladders = [], platform = null;
+let activeLayout = null;
 const DRUM = { x: 12, y: 456 };   // bottom-left, as in the arcade; y set in buildLevel
 
-function buildLevel() {
-  girders = [
+function levelOne() {
+  const g = [
     Girder(0, 492, 448, 484),      // 0 ground: slight fall toward the oil drum (left)
     Girder(0, 419, 412, 446),      // 1 open at right end
     Girder(36, 381, 448, 353),     // 2 open at left end
@@ -384,21 +406,84 @@ function buildLevel() {
     Girder(36, 250, 448, 222),     // 4 open at left end
     Girder(0, 167, 412, 176),      // 5  (Donkey Kong's floor, nearly flat)
   ];
-  platform = Girder(175, 112, 270, 112); // Pauline's platform
+  const p = Girder(175, 112, 270, 112); // Pauline's platform
+  const L = (gi, x, broken) => {
+    const below = g[gi], above = g[gi + 1] || p;
+    return { x, yBottom: below.yAt(x), yTop: above.yAt(x), broken: !!broken, gi };
+  };
+  return {
+    girders: g,
+    platform: p,
+    style: 1,
+    startX: 78,
+    kongGirder: 5,
+    barrelGirder: 5,
+    hammerPositions: [
+      { x: 70, gi: 4 },
+      { x: 350, gi: 1 },
+    ],
+    ladders: [
+      L(0, 53, true),  L(0, 166, true), L(0, 374),
+      L(1, 70),  L(1, 198),
+      L(2, 137, true), L(2, 230), L(2, 374),
+      L(3, 70),  L(3, 150), L(3, 342, true),
+      L(4, 182, true), L(4, 374),
+      Object.assign(L(5, 127), { yTop: 62, decorative: true }),
+      Object.assign(L(5, 160), { yTop: 62, decorative: true }),
+      L(5, 262),
+    ],
+  };
+}
+
+function levelTwo() {
+  const g = [
+    Girder(17, 496, 434, 496),     // ground
+    Girder(31, 418, 419, 418),
+    Girder(46, 340, 405, 340),
+    Girder(60, 262, 390, 262),
+    Girder(0, 184, 375, 184),      // Kong's girder
+  ];
+  const p = Girder(120, 100, 328, 100);
+  const L = (gi, x, broken) => {
+    const below = g[gi], above = g[gi + 1] || p;
+    return { x, yBottom: below.yAt(x), yTop: above.yAt(x), broken: !!broken, gi };
+  };
+  return {
+    girders: g,
+    platform: p,
+    style: 2,
+    startX: 250,
+    kongGirder: 4,
+    barrelGirder: 4,
+    hammerPositions: [
+      { x: 220, y: 212 },
+      { x: 40, y: 290 },
+    ],
+    centralLeft: 123,
+    centralRight: 323,
+    supportXs: [150, 300],
+    rivetGirders: [1, 2, 3, 4],
+    ladders: [
+      L(0, 39), L(0, 218), L(0, 412),
+      L(1, 54), L(1, 158), L(1, 293), L(1, 397),
+      L(2, 69), L(2, 218), L(2, 382),
+      L(3, 84), L(3, 143), L(3, 308), L(3, 367),
+    ],
+  };
+}
+
+const levelLayouts = [levelOne, levelTwo];
+
+function buildLevel(levelNumber) {
+  levelNumber = levelNumber || 1;
+  const layout = levelLayouts[Math.min(levelNumber - 1, levelLayouts.length - 1)];
+  const data = layout();
+  girders = data.girders;
+  ladders = data.ladders;
+  platform = data.platform;
+  activeLayout = data;
   DRUM.y = girders[0].yAt(DRUM.x + 10) - 20;   // sit the drum on the ground
 
-  // Ladders connect the surface of girder `gi` (yBottom) up to girder `gi+1` (yTop).
-  const L = (gi, x, broken) => {
-    const below = girders[gi], above = girders[gi + 1] || platform;
-    ladders.push({ x, yBottom: below.yAt(x), yTop: above.yAt(x), broken: !!broken });
-  };
-  ladders = [];
-  L(0, 53, true);  L(0, 166, true); L(0, 374);
-  L(1, 70);  L(1, 198);
-  L(2, 137, true); L(2, 230); L(2, 374);
-  L(3, 70);  L(3, 150); L(3, 342, true);
-  L(4, 182, true); L(4, 374);
-  L(5, 190); L(5, 226); L(5, 262);         // up to Pauline's platform (all land on it)
   // broken ladders stop short: you fall through the missing lower rungs
   for (const l of ladders) {
     l.effBottom = l.broken ? l.yBottom - (l.yBottom - l.yTop) * 0.42 : l.yBottom;
@@ -422,7 +507,7 @@ function surfaceBelow(x, y, maxDrop, skip) {
 }
 function laddersNear(x, r) {
   const out = [];
-  for (const l of ladders) if (Math.abs(l.x - x) <= r) out.push(l);
+  for (const l of ladders) if (!l.decorative && Math.abs(l.x - x) <= r) out.push(l);
   return out;
 }
 
@@ -626,6 +711,8 @@ function drawBackdrop() {
 const GIRDER_H = 20, GIRDER_TOP = 5, GIRDER_BOT = 5;
 
 function drawGirder(g) {
+  const girderColor = activeLayout && activeLayout.style === 2 ? [0, 64, 224] : COL.girder;
+  const girderLite = activeLayout && activeLayout.style === 2 ? [0, 204, 255] : COL.girderLite;
   const H = GIRDER_H, CHORD = GIRDER_TOP, ih = H - CHORD - GIRDER_BOT;
   const dx = g.x2 - g.x1, dy = g.y2 - g.y1;
   const len = Math.hypot(dx, dy);
@@ -637,15 +724,15 @@ function drawGirder(g) {
   // solid beam
   for (let i = 0; i <= steps; i++) {
     const x = X(i), y = Y(i);
-    rect(x - HALF, y, HALF * 2 + 1, H, COL.girder);
+    rect(x - HALF, y, HALF * 2 + 1, H, girderColor);
   }
   // chords: mirrored, so the underside mirrors the top edge
   for (let i = 0; i <= steps; i++) {
     const x = X(i), y = Y(i);
-    rect(x - HALF, y, HALF * 2 + 1, CHORD, COL.girderLite);
-    rect(x - HALF, y + CHORD, HALF * 2 + 1, 1, COL.girder);
-    rect(x - HALF, y + H - CHORD - 1, HALF * 2 + 1, 1, COL.girder);
-    rect(x - HALF, y + H - CHORD, HALF * 2 + 1, CHORD, COL.girderLite);
+    rect(x - HALF, y, HALF * 2 + 1, CHORD, girderLite);
+    rect(x - HALF, y + CHORD, HALF * 2 + 1, 1, girderColor);
+    rect(x - HALF, y + H - CHORD - 1, HALF * 2 + 1, 1, girderColor);
+    rect(x - HALF, y + H - CHORD, HALF * 2 + 1, CHORD, girderLite);
   }
   // One black ◇ per cell, centred on the girder mid-line so the pattern is
   // symmetric about it. Drawn as vertical slices: at horizontal offset u
@@ -670,11 +757,13 @@ function drawGirder(g) {
 }
 
 function drawLadder(l) {
+  const ladderColor = activeLayout && activeLayout.style === 2 ? [255, 196, 0] : COL.ladder;
+  const ladderDark = activeLayout && activeLayout.style === 2 ? [168, 112, 0] : COL.ladderDark;
   const w = 22, rail = 3;
   const yb = l.broken ? l.effBottom : l.yBottom;
   const h = yb - l.yTop;
-  const c = l.broken ? COL.broken : COL.ladder;
-  const cd = l.broken ? COL.broken : COL.ladderDark;
+  const c = l.broken ? COL.broken : ladderColor;
+  const cd = l.broken ? COL.broken : ladderDark;
   rect(l.x - w / 2, l.yTop, rail, h, c);
   rect(l.x + w / 2 - rail, l.yTop, rail, h, c);
   rect(l.x - w / 2 + rail, l.yTop, 1, h, cd);
@@ -690,7 +779,7 @@ function drawLadder(l) {
 }
 
 // Build the level now that the draw helpers buildStatic() needs exist.
-buildLevel();
+buildLevel(1);
 
 /* ============================================================
    GAME STATE
@@ -704,12 +793,13 @@ const PW = 10 * SPR_SCALE, PH = 12 * SPR_SCALE;          // player hitbox
 const GRAV = 0.1, JUMP_V = -2.5, WALK = 1.55, CLIMB = 1.0;
 
 const G = {
-  mode: 'title',           // title | ready | play | dying | complete | gameover | win
+  mode: 'title',           // title | ready | play | dying | complete | collapse | win | gameover
   modeT: 0,
   score: 0, bonus: 5000, level: 1, lives: 3,
   t: 0, shake: 0,
   player: null, kong: null,
   barrels: [], fireballs: [], hammers: [], items: [], floats: [], parts: [],
+  rivets: [], collapseStarted: false, collapseTime: 0,
   spawnT: 0, fireT: 0,
   difficulty: 1,
   hitFlash: 0,
@@ -720,8 +810,9 @@ function saveHi() {
 }
 
 function newPlayer() {
+  const x = activeLayout ? activeLayout.startX : 78;
   return {
-    x: 78, y: girders[0].yAt(78) - PH, vx: 0, vy: 0,
+    x, y: girders[0].yAt(x) - PH, vx: 0, vy: 0,
     onGround: true, climbing: null,
     face: 1, anim: 0, hammer: null, hammerT: 0, swing: 0, swingWait: 0,
     invuln: 0, dead: false,
@@ -729,16 +820,30 @@ function newPlayer() {
 }
 
 function resetLevel(full) {
+  if (full) {
+    G.score = 0; G.lives = 3; G.level = 1; G.difficulty = 1;
+    buildLevel(G.level);
+  }
   G.player = newPlayer();
   G.barrels = []; G.fireballs = []; G.items = []; G.parts = []; G.floats = [];
-  G.spawnT = 90; G.fireT = 260;
-  G.kong = { x: 60, y: girders[5].yAt(60) - 30, face: 1, anim: 0, throwT: 120, state: 'idle', armT: 0, rage: 0 };
-  G.hammers = [
-    { x: 70, y: girders[4].yAt(70) - 12, taken: false },
-    { x: 350, y: girders[1].yAt(350) - 12, taken: false },
-  ];
+  G.spawnT = 90; G.fireT = activeLayout.style === 2 ? 80 : 260;
+  G.rivets = [];
+  G.collapseStarted = false;
+  G.collapseTime = 0;
+  if (activeLayout.style === 2) {
+    for (const gi of activeLayout.rivetGirders) {
+      for (const x of [activeLayout.centralLeft, activeLayout.centralRight]) {
+        G.rivets.push({ gi, x, y: girders[gi].yAt(x), removed: false });
+      }
+    }
+  }
+  const kongGirder = girders[activeLayout.kongGirder];
+  const kongX = activeLayout.style === 2 ? 230 : 60;
+  G.kong = { x: kongX, y: kongGirder.yAt(kongX) - 30, vy: 0, fall: false, face: 1, anim: 0, throwT: 120, state: 'idle', armT: 0, rage: 0 };
+  G.hammers = activeLayout.hammerPositions.map(({ x, gi, y }) => ({
+    x, y: y == null ? girders[gi].yAt(x) - 12 : y, taken: false,
+  }));
   G.bonus = 5000;
-  if (full) { G.score = 0; G.lives = 3; G.level = 1; G.difficulty = 1; }
 }
 resetLevel(true);
 
@@ -759,7 +864,8 @@ function burst(x, y, col, n, spd) {
 
 /* ---------- barrels ---------- */
 function spawnBarrel() {
-  const g = girders[5];
+  if (activeLayout.style === 2) return;
+  const g = girders[activeLayout.barrelGirder];
   G.barrels.push({
     x: g.x1 + 40, y: g.yAt(g.x1 + 40) - BARREL_H, vx: 1.15 + 0.12 * G.difficulty, vy: 0,
     roll: g.roll, onGround: true, dead: false, spin: 0, fromFire: false,
@@ -768,6 +874,19 @@ function spawnBarrel() {
 }
 function spawnFireball(fromBarrel) {
   if (G.fireballs.length >= 3) return;
+  if (activeLayout.style === 2) {
+    const gi = Math.floor(Math.random() * activeLayout.rivetGirders.length);
+    const floorIndex = activeLayout.rivetGirders[gi];
+    const g = girders[floorIndex];
+    const x = g.x1 + 20 + Math.random() * (g.x2 - g.x1 - 40);
+    G.fireballs.push({
+      x, y: g.yAt(x) - 10, vx: 0.75 + 0.08 * G.difficulty,
+      dir: G.player.x < x ? -1 : 1, floorIndex, climbTarget: null,
+      climbDir: -1, climbToFloor: floorIndex, anim: 0, waitT: 0, dead: false,
+    });
+    SFX.fireball();
+    return;
+  }
   G.fireballs.push({
     x: DRUM.x + 4, y: DRUM.y + 16, vx: 0.8 + 0.1 * G.difficulty, vy: 0,
     dir: 1, climbDir: -1, anim: 0, climbTarget: null, waitT: 0, dead: false,
@@ -831,6 +950,10 @@ function barrelStep(b) {
 
 function fireballStep(f) {
   f.anim += 0.2;
+  if (activeLayout.style === 2) {
+    levelTwoFireballStep(f);
+    return;
+  }
   if (f.waitT > 0) { f.waitT--; return; }
   if (f.climbTarget) {
     const l = f.climbTarget;
@@ -863,6 +986,55 @@ function fireballStep(f) {
     }
   }
   if (f.x < -20 || f.x > VW + 20 || f.y > VH + 30) f.dead = true;
+}
+
+function levelTwoFireballStep(f) {
+  const playerFloor = girders.reduce((best, g, i) => {
+    const distance = Math.abs(g.yAt(G.player.x) - (G.player.y + PH));
+    return distance < best.distance ? { index: i, distance } : best;
+  }, { index: 0, distance: Infinity }).index;
+  const cx = f.x + 6;
+
+  if (f.climbTarget) {
+    const l = f.climbTarget;
+    f.x = l.x - 6;
+    f.y += f.climbDir;
+    const reached = f.climbDir < 0 ? f.y <= l.yTop - 10 : f.y >= l.yBottom - 10;
+    if (reached) {
+      f.floorIndex = f.climbToFloor;
+      f.climbTarget = null;
+      f.y = girders[f.floorIndex].yAt(l.x) - 10;
+      f.waitT = 8;
+    }
+    return;
+  }
+  if (f.waitT > 0) { f.waitT--; return; }
+
+  if (f.floorIndex !== playerFloor) {
+    const step = playerFloor > f.floorIndex ? f.floorIndex : f.floorIndex - 1;
+    const ladder = ladders
+      .filter(l => !l.broken && l.gi === step)
+      .sort((a, b) => Math.abs(a.x - (f.x + 6)) - Math.abs(b.x - (f.x + 6)))[0];
+    if (ladder) {
+      const dx = ladder.x - cx;
+      f.dir = Math.sign(dx) || f.dir;
+      f.x += f.dir * Math.min(Math.abs(dx), f.vx);
+      if (Math.abs(dx) <= f.vx + 1) {
+        f.x = ladder.x - 6;
+        f.climbTarget = ladder;
+        f.climbDir = playerFloor > f.floorIndex ? -1 : 1;
+        f.climbToFloor = playerFloor;
+      } else {
+        f.y = girders[f.floorIndex].yAt(f.x + 6) - 10;
+      }
+    }
+    return;
+  }
+
+  const dx = G.player.x - cx;
+  f.dir = Math.sign(dx) || f.dir;
+  f.x += f.dir * Math.min(Math.abs(dx), f.vx);
+  f.y = girders[f.floorIndex].yAt(f.x + 6) - 10;
 }
 
 /* ============================================================
@@ -1060,6 +1232,60 @@ function updatePlayer(p) {
   tryPickup(p);
 }
 
+function updateRivets(p) {
+  if (activeLayout.style !== 2 || !p.onGround || p.climbing) return;
+  for (const rivet of G.rivets) {
+    if (rivet.removed) continue;
+    const girder = girders[rivet.gi];
+    if (Math.abs(p.x - rivet.x) <= 10 && Math.abs(p.y + PH - girder.yAt(p.x)) <= 5) {
+      rivet.removed = true;
+      addScore(800, rivet.x, rivet.y - 8, '');
+      burst(rivet.x, rivet.y + 7, [255, 196, 0], 8, 1.6);
+      if (G.rivets.every(r => r.removed)) beginStageTwoCollapse();
+    }
+  }
+}
+
+function beginStageTwoCollapse() {
+  if (G.mode !== 'play') return;
+  G.mode = 'collapse';
+  G.modeT = 0;
+  G.collapseStarted = true;
+  G.collapseTime = 0;
+  G.fireballs = [];
+  G.barrels = [];
+  G.kong.fall = true;
+  G.kong.vy = 0;
+  G.player.climbing = null;
+  G.player.vx = 0;
+  G.player.vy = 0;
+  G.bonusLeft = G.bonus;
+  G.score += G.bonus + 1000;
+  saveHi();
+  SFX.complete();
+  burst(G.kong.x, G.kong.y, COL.fire1, 24, 3);
+}
+
+function updateCollapse() {
+  G.collapseTime++;
+  const k = G.kong, p = G.player;
+  k.anim += 0.05;
+  k.vy += 0.025;
+  k.y += k.vy;
+  const rescueX = platform.x1 + 40;
+  p.x += (rescueX - p.x) * 0.055;
+  p.y += (platform.y - PH - p.y) * 0.055;
+  p.vx = p.vy = 0;
+  p.onGround = true;
+  if (G.mode === 'collapse' && G.modeT > 150) {
+    p.x = rescueX;
+    p.y = platform.y - PH;
+    G.mode = 'win';
+    G.modeT = 0;
+    burst(p.x, p.y, COL.clear, 40, 4);
+  }
+}
+
 /* ============================================================
    KONG
    ============================================================ */
@@ -1067,6 +1293,10 @@ function updateKong(k) {
   k.anim += 0.05;
   if (k.armT > 0) k.armT--;
   if (G.mode !== 'play') return;
+  if (activeLayout.style === 2) {
+    k.face = G.player.x < k.x ? -1 : 1;
+    return;
+  }
   k.throwT--;
   if (k.throwT <= 0) {
     k.armT = 26;
@@ -1118,11 +1348,12 @@ function checkHits() {
     }
     if (overlap(pb, fb)) return kill('fire');
   }
-  // Kong himself
-  const kb = { x: k_box().x, y: k_box().y, w: k_box().w, h: k_box().h };
-  if (overlap(pb, kb)) {
-    if (hb && overlap(hb, kb)) { G.kong.rage = 40; G.shake = 7; G.kong.throwT = Math.max(20, G.kong.throwT - 40); }
-    else return kill('kong');
+  if (activeLayout.style !== 2) {
+    const kb = { x: k_box().x, y: k_box().y, w: k_box().w, h: k_box().h };
+    if (overlap(pb, kb)) {
+      if (hb && overlap(hb, kb)) { G.kong.rage = 40; G.shake = 7; G.kong.throwT = Math.max(20, G.kong.throwT - 40); }
+      else return kill('kong');
+    }
   }
 }
 function k_box() { const k = G.kong; return { x: k.x - 16, y: k.y, w: 32, h: 30 }; }
@@ -1216,6 +1447,10 @@ function disc(cx, cy, r, col) {
 }
 
 function drawKong(k) {
+  if (k.fall) {
+    drawFallenKong(k);
+    return;
+  }
   const bob = Math.sin(k.anim * 2) * 1.5;
   const x = Math.round(k.x), y = Math.round(k.y + bob);
   const f = k.face;
@@ -1274,6 +1509,25 @@ function drawKong(k) {
   if (rage) rect(x + 15, y - 22, 3, 6, [130, 210, 255]);
   // barrel being thrown
   if (armUp) drawBarrelShape(x + f * 24, y - 26, 0, 0, BARREL_SCALE);
+}
+
+function drawFallenKong(k) {
+  const x = Math.round(k.x), y = Math.round(k.y);
+  const fur = COL.kong, furD = COL.kongDark, skin = COL.kongFace;
+  rect(x - 13, y, 10, 15, furD);
+  rect(x + 3, y, 10, 15, furD);
+  rect(x - 18, y + 11, 14, 5, furD);
+  rect(x + 4, y + 11, 14, 5, furD);
+  rect(x - 17, y + 13, 34, 17, fur);
+  rect(x - 11, y + 16, 22, 12, skin);
+  rect(x - 14, y + 27, 28, 20, fur);
+  rect(x - 12, y + 33, 24, 11, skin);
+  rect(x - 13, y + 31, 26, 4, furD);
+  rect(x - 8, y + 35, 5, 5, COL.white);
+  rect(x + 3, y + 35, 5, 5, COL.white);
+  rect(x - 7, y + 36, 3, 3, COL.black);
+  rect(x + 4, y + 36, 3, 3, COL.black);
+  rect(x - 8, y + 43, 16, 2, furD);
 }
 
 function drawBarrelShape(cx, cy, spin, rollDir, scale) {
@@ -1347,6 +1601,7 @@ function drawItem(it) {
 }
 
 function drawOilDrum() {
+  if (activeLayout.style === 2) return;
   const x = DRUM.x, y = DRUM.y;
   drawSprite(SP_DRUM, x, y, false, 2);
   // flames licking out of the open top
@@ -1395,6 +1650,9 @@ function update() {
         if (G.bonus > 0 && G.bonus % 500 === 0) SFX.bonus();
       }
       updatePlayer(G.player);
+      if (G.mode !== 'play') break;
+      updateRivets(G.player);
+      if (G.mode !== 'play') break;
       updateKong(G.kong);
       for (const b of G.barrels) barrelStep(b);
       for (const f of G.fireballs) fireballStep(f);
@@ -1403,17 +1661,19 @@ function update() {
       G.hammers = G.hammers.filter(h => !h.taken);   // a taken hammer is gone for good
       checkHits();
       // spawners
-      if (--G.spawnT <= 0) {
+      if (activeLayout.style !== 2 && --G.spawnT <= 0) {
         spawnBarrel();
         G.spawnT = (Math.max(48, 120 - G.level * 10) + Math.random() * 70) * BARREL_RATE;
       }
       if (--G.fireT <= 0) {
         spawnFireball();
-        G.fireT = Math.max(360, 900 - G.level * 60) + Math.random() * 300;
+        G.fireT = activeLayout.style === 2
+          ? 150 + Math.random() * 100
+          : Math.max(360, 900 - G.level * 60) + Math.random() * 300;
       }
       // reach Pauline
       const p = G.player;
-      if (p.y + PH <= platform.y + 2 && p.x > platform.x1 - 6 && p.x < platform.x2 + 6) {
+      if (activeLayout.style !== 2 && p.y + PH <= platform.y + 2 && p.x > platform.x1 - 6 && p.x < platform.x2 + 6) {
         G.mode = 'complete'; G.modeT = 0; saveHi();
         const timeBonus = G.bonus;
         G.score += timeBonus + 1000;
@@ -1424,11 +1684,19 @@ function update() {
       break;
     }
 
+    case 'collapse':
+      updateCollapse();
+      break;
+
+    case 'win':
+      if (pressed.start) { resetLevel(true); setMode('ready'); }
+      break;
+
     case 'complete':
       if (G.modeT > 190) {
         G.level++;
         G.difficulty = 1 + G.level * 0.35;
-        buildLevel();
+        buildLevel(G.level);
         resetLevel(false);
         setMode('ready');
       }
@@ -1475,12 +1743,16 @@ function render() {
 
   // pass 2: cached girders + ladders (rebuilt only by buildLevel)
   drawStatic();
+  begin();
+  drawFallingChunks();
+  flush();
 
   // pass 3: entities
   begin();
+  drawRivets();
   drawHammerPickups();
   drawPauline();
-  drawBarrelStack(G.kong);
+  if (activeLayout.style !== 2) drawBarrelStack(G.kong);
   drawKong(G.kong);
   for (const it of G.items) drawItem(it);
   for (const b of G.barrels) drawBarrelShape(b.x + BARREL_W / 2, b.y + BARREL_H / 2, b.spin, b.onGround ? b.roll : 0, BARREL_SCALE);
@@ -1509,7 +1781,7 @@ function drawPauline() {
   if (help && Math.floor(G.t * 2) % 2 === 0) {
     drawText('HELP!', cx + 14, cy - 14, COL.white, 1);
   }
-  if (G.mode === 'complete') {
+  if (G.mode === 'complete' || G.mode === 'win') {
     // the embrace + hearts
     for (let i = 0; i < 3; i++) {
       const t = (G.t * 2 + i * 0.6) % 2;
@@ -1517,6 +1789,17 @@ function drawPauline() {
       rect(hx - 3, hy, 3, 3, COL.hatRed); rect(hx + 1, hy, 3, 3, COL.hatRed);
       rect(hx - 2, hy + 3, 5, 3, COL.hatRed); rect(hx - 1, hy + 6, 3, 2, COL.hatRed);
     }
+  }
+}
+
+function drawRivets() {
+  for (const rivet of G.rivets) {
+    if (rivet.removed) continue;
+    const x = rivet.x, y = rivet.y + 3;
+    rect(x - 7, y, 14, 14, [255, 196, 0]);
+    rect(x - 5, y + 2, 10, 10, [204, 128, 0]);
+    rect(x - 3, y + 4, 6, 6, [255, 232, 96]);
+    rect(x - 1, y + 6, 2, 2, [255, 255, 220]);
   }
 }
 
@@ -1583,6 +1866,10 @@ function drawHud() {
   drawText('BONUS', bx + 7, by + 4, HUD_CYAN, 2);
   const low = G.bonus <= 1000 && Math.floor(G.t * 4) % 2 === 0;
   drawText(String(G.bonus).padStart(4, '0'), bx + bw - 7 - 4 * 8, by + 2, low ? HUD_RED : COL.white, 2);
+  if (activeLayout.style === 2) {
+    const removed = G.rivets.filter(r => r.removed).length;
+    drawTextC('RIVETS ' + String(removed).padStart(2, '0') + '/08', 224, 65, [255, 196, 0], 2);
+  }
 
   // lives as little DK heads
   for (let i = 0; i < Math.max(0, G.lives - 1); i++) {
@@ -1619,6 +1906,14 @@ function drawOverlay() {
       h = `<div class="big">level clear!</div>
            <div>time bonus ${G.bonusLeft || 0}</div>
            <div class="sub">next level climbing${'!'}</div>`;
+      break;
+    case 'collapse':
+      h = `<div class="big">rivets gone!</div>
+           <div class="sub">the platform is collapsing</div>`;
+      break;
+    case 'win':
+      h = `<div class="big">you saved Pauline!</div>
+           <div class="sub">${blink}press enter to play again${'</span>'}</div>`;
       break;
     case 'gameover':
       h = `<div class="big" style="color:var(--danger)">game over</div>
