@@ -198,6 +198,16 @@ let staticCount = 0;
 function buildStatic() {
   qn = 0;
   for (const g of girders) drawGirder(g);
+  if (activeLayout.style === 4) {
+    for (const gi of activeLayout.endCappedGirders) {
+      const g = girders[gi];
+      for (const x of [g.x1, g.x2]) {
+        rect(x - 9, g.yAt(x) + 2, 18, 16, [40, 88, 232]);
+        rect(x - 6, g.yAt(x) + 5, 12, 10, [248, 48, 72]);
+        rect(x - 3, g.yAt(x) + 8, 6, 4, [255, 224, 120]);
+      }
+    }
+  }
   if (activeLayout.style === 2) {
     const top = girders[activeLayout.kongGirder];
     for (const x of activeLayout.supportXs) {
@@ -231,6 +241,37 @@ function drawFallingChunks() {
       activeLayout.centralLeft, g.yAt(activeLayout.centralLeft) + drop,
       activeLayout.centralRight, g.yAt(activeLayout.centralRight) + drop
     ));
+  }
+}
+function drawLevelFourMachinery() {
+  if (activeLayout.style !== 4) return;
+  const netLine = (x1, y1, x2, y2) => {
+    const dx = x2 - x1, dy = y2 - y1;
+    rotRect((x1 + x2) / 2, (y1 + y2) / 2, Math.hypot(dx, dy), 2,
+      Math.atan2(dy, dx), [232, 136, 56]);
+  };
+  for (let i = 0; i <= 6; i++) {
+    const t = i / 6;
+    const topX = 201 + t * 46;
+    const bottomX = 180 + t * 88;
+    netLine(topX, 279, bottomX, 330);
+    netLine(topX, 279, 268 - t * 88, 330);
+  }
+  rect(212, 252, 24, 27, [0, 120, 232]);
+  rect(215, 255, 18, 19, [0, 208, 248]);
+  rect(218, 258, 5, 5, [24, 48, 168]);
+  rect(226, 258, 5, 5, [24, 48, 168]);
+  rect(218, 266, 5, 5, [24, 48, 168]);
+  rect(226, 266, 5, 5, [24, 48, 168]);
+  for (const x of [193, 255]) {
+    rect(x, 252, 13, 13, [40, 88, 232]);
+    rect(x + 3, 255, 7, 7, [248, 48, 72]);
+    rect(x + 5, 257, 3, 3, [255, 220, 96]);
+  }
+  for (let i = 0; i < 4; i++) {
+    const flicker = (G.t * 8 + i * 1.3) % 8;
+    rect(216 + i * 4, 246 - flicker, 3, 5 + flicker / 2,
+      [255, 168 - flicker * 8, 40, 0.85 - flicker * 0.07]);
   }
 }
 function drawElevators() {
@@ -539,7 +580,58 @@ function levelThree() {
   };
 }
 
-const levelLayouts = [levelOne, levelTwo, levelThree];
+function levelFour() {
+  const surfaces = [
+    Girder(0, 492, 448, 492),       // ground
+    Girder(0, 180, 448, 180),       // Kong's deck
+    Girder(175, 116, 274, 116),     // Pauline's platform
+    Girder(0, 260, 448, 260),       // upper full-width beam
+    Girder(18, 331, 98, 331),       // left platform
+    Girder(130, 331, 307, 331),     // central platform and lift net
+    Girder(338, 331, 434, 331),     // right platform
+    Girder(5, 414, 443, 414),       // lower full-width beam
+  ];
+  const ladder = (x, yTop, yBottom) => ({
+    x, yTop, yBottom, broken: false, effBottom: yBottom,
+  });
+  return {
+    girders: surfaces,
+    platform: surfaces[2],
+    style: 4,
+    startX: 130,
+    startGirder: 0,
+    kongGirder: 1,
+    barrelGirder: 1,
+    hammerPositions: [],
+    endCappedGirders: [1, 3, 7],
+    itemPositions: [
+      { x: 42, y: 286, kind: 'hat', val: 300 },
+      { x: 410, y: 318, kind: 'umbrella', val: 300 },
+      { x: 249, y: 478, kind: 'purse', val: 300 },
+    ],
+    ladders: [
+      ladder(129, 68, 180),
+      ladder(159, 68, 180),
+      ladder(248, 132, 180),
+      ladder(39, 200, 260),
+      ladder(383, 200, 260),
+      ladder(54, 280, 331),
+      ladder(158, 280, 331),
+      ladder(263, 280, 331),
+      ladder(368, 280, 331),
+      ladder(54, 351, 414),
+      ladder(131, 351, 414),
+      ladder(263, 351, 414),
+      ladder(368, 351, 414),
+      ladder(54, 434, 492),
+      ladder(159, 434, 492),
+      ladder(263, 434, 492),
+      ladder(368, 434, 492),
+    ],
+  };
+}
+
+const levelLayouts = [levelOne, levelTwo, levelThree, levelFour];
 
 function buildLevel(levelNumber) {
   levelNumber = levelNumber || 1;
@@ -781,8 +873,10 @@ function drawBackdrop() {
 const GIRDER_H = 20, GIRDER_TOP = 5, GIRDER_BOT = 5;
 
 function drawGirder(g) {
-  const girderColor = activeLayout && activeLayout.style === 2 ? [0, 64, 224] : COL.girder;
-  const girderLite = activeLayout && activeLayout.style === 2 ? [0, 204, 255] : COL.girderLite;
+  const stageTwo = activeLayout && activeLayout.style === 2;
+  const stageFour = activeLayout && activeLayout.style === 4;
+  const girderColor = stageTwo ? [0, 64, 224] : stageFour ? [232, 104, 24] : COL.girder;
+  const girderLite = stageTwo ? [0, 204, 255] : stageFour ? [255, 176, 88] : COL.girderLite;
   const H = GIRDER_H, CHORD = GIRDER_TOP, ih = H - CHORD - GIRDER_BOT;
   const dx = g.x2 - g.x1, dy = g.y2 - g.y1;
   const len = Math.hypot(dx, dy);
@@ -827,8 +921,10 @@ function drawGirder(g) {
 }
 
 function drawLadder(l) {
-  const ladderColor = activeLayout && activeLayout.style === 2 ? [255, 196, 0] : COL.ladder;
-  const ladderDark = activeLayout && activeLayout.style === 2 ? [168, 112, 0] : COL.ladderDark;
+  const stageTwo = activeLayout && activeLayout.style === 2;
+  const stageFour = activeLayout && activeLayout.style === 4;
+  const ladderColor = stageTwo ? [255, 196, 0] : stageFour ? [232, 232, 240] : COL.ladder;
+  const ladderDark = stageTwo ? [168, 112, 0] : stageFour ? [136, 144, 168] : COL.ladderDark;
   const w = 22, rail = 3;
   const yb = l.broken ? l.effBottom : l.yBottom;
   const h = yb - l.yTop;
@@ -901,7 +997,7 @@ function resetLevel(full) {
     elevator: true,
     yAt() { return this.y; },
   })) : [];
-  G.spawnT = 90; G.fireT = activeLayout.style === 2 ? 80 : 260;
+  G.spawnT = 90; G.fireT = activeLayout.style === 2 ? 80 : activeLayout.style === 4 ? Infinity : 260;
   G.rivets = [];
   G.collapseStarted = false;
   G.collapseTime = 0;
@@ -913,11 +1009,14 @@ function resetLevel(full) {
     }
   }
   const kongGirder = girders[activeLayout.kongGirder];
-  const kongX = activeLayout.style === 2 ? 230 : activeLayout.style === 3 ? 90 : 60;
+  const kongX = activeLayout.style === 2 ? 230 : activeLayout.style === 3 ? 90 : activeLayout.style === 4 ? 100 : 60;
   G.kong = { x: kongX, y: kongGirder.yAt(kongX) - 30, vy: 0, fall: false, face: 1, anim: 0, throwT: 120, state: 'idle', armT: 0, rage: 0 };
   G.hammers = activeLayout.hammerPositions.map(({ x, gi, y }) => ({
     x, y: y == null ? girders[gi].yAt(x) - 12 : y, taken: false,
   }));
+  G.items.push(...(activeLayout.itemPositions || []).map(item => ({
+    ...item, life: Infinity, dead: false, static: true,
+  })));
   G.bonus = 5000;
 }
 resetLevel(true);
@@ -1698,9 +1797,23 @@ function drawItem(it) {
   if (it.dead) return;
   const b = Math.sin(G.t * 4 + it.x) * 1.5;
   if (it.kind === 'purse') {
-    rect(it.x - 6, it.y - 5 + b, 12, 10, COL.fire1);
-    rect(it.x - 6, it.y - 5 + b, 12, 2, COL.white);
-    rect(it.x - 2, it.y - 8 + b, 4, 3, COL.fire2);
+    rect(it.x - 8, it.y - 6 + b, 16, 12, COL.fire1);
+    rect(it.x - 8, it.y - 6 + b, 16, 2, COL.white);
+    rect(it.x - 2, it.y - 9 + b, 4, 3, COL.fire2);
+  } else if (it.kind === 'umbrella') {
+    rect(it.x - 10, it.y - 7 + b, 20, 3, [248, 64, 192]);
+    rect(it.x - 8, it.y - 10 + b, 16, 3, [248, 136, 224]);
+    rect(it.x - 5, it.y - 12 + b, 10, 2, [248, 64, 192]);
+    rect(it.x - 1, it.y - 4 + b, 2, 11, COL.white);
+    rect(it.x, it.y + 5 + b, 5, 2, COL.white);
+    rect(it.x - 7, it.y - 4 + b, 2, 2, COL.white);
+    rect(it.x + 5, it.y - 4 + b, 2, 2, COL.white);
+  } else if (it.kind === 'hat') {
+    rect(it.x - 8, it.y - 2 + b, 16, 4, [240, 40, 48]);
+    rect(it.x - 6, it.y - 6 + b, 12, 4, [248, 56, 48]);
+    rect(it.x - 3, it.y - 8 + b, 6, 2, [255, 224, 120]);
+    rect(it.x - 5, it.y - 3 + b, 2, 2, COL.white);
+    rect(it.x - 9, it.y + 1 + b, 18, 2, [255, 224, 120]);
   } else {
     rect(it.x - 5, it.y - 5 + b, 10, 10, COL.clear);
     rect(it.x - 2, it.y - 2 + b, 4, 4, COL.white);
@@ -1738,8 +1851,8 @@ function update() {
   G.parts = G.parts.filter(p => p.life > 0);
   for (const f of G.floats) { f.y -= 0.5; f.life--; }
   G.floats = G.floats.filter(f => f.life > 0);
-  for (const it of G.items) if (!it.dead) it.life--;
-  G.items = G.items.filter(it => !it.dead && it.life > 0);
+  for (const it of G.items) if (!it.dead && !it.static) it.life--;
+  G.items = G.items.filter(it => !it.dead && (it.static || it.life > 0));
 
   switch (G.mode) {
     case 'title':
@@ -1773,7 +1886,7 @@ function update() {
         spawnBarrel();
         G.spawnT = (Math.max(48, 120 - G.level * 10) + Math.random() * 70) * BARREL_RATE;
       }
-      if (--G.fireT <= 0) {
+      if (activeLayout.style !== 4 && --G.fireT <= 0) {
         spawnFireball();
         G.fireT = activeLayout.style === 2
           ? 150 + Math.random() * 100
@@ -1858,6 +1971,7 @@ function render() {
   begin();
   drawFallingChunks();
   drawElevators();
+  drawLevelFourMachinery();
   flush();
 
   // pass 3: entities
