@@ -204,7 +204,7 @@ function buildStatic() {
       rect(x - 2, platform.y + GIRDER_H, 5, top.yAt(x) - platform.y - GIRDER_H, [0, 204, 255]);
     }
   }
-  drawGirder(platform);
+  if (!girders.includes(platform)) drawGirder(platform);
   for (const l of ladders) drawLadder(l);
   staticCount = qn;
   gl.bindBuffer(gl.ARRAY_BUFFER, staticVBO);
@@ -231,6 +231,14 @@ function drawFallingChunks() {
       activeLayout.centralLeft, g.yAt(activeLayout.centralLeft) + drop,
       activeLayout.centralRight, g.yAt(activeLayout.centralRight) + drop
     ));
+  }
+}
+function drawElevators() {
+  for (const elevator of G.elevators) {
+    rect(elevator.x1 + (elevator.x2 - elevator.x1) / 2 - 1, elevator.trackTop, 3,
+      elevator.trackBottom - elevator.trackTop, [176, 40, 48]);
+    rect(elevator.x1 - 4, elevator.y - 5, elevator.x2 - elevator.x1 + 8, 5, [255, 196, 0]);
+    drawGirder(Girder(elevator.x1, elevator.y, elevator.x2, elevator.y));
   }
 }
 
@@ -472,7 +480,66 @@ function levelTwo() {
   };
 }
 
-const levelLayouts = [levelOne, levelTwo];
+function levelThree() {
+  const surfaces = [
+    Girder(8, 496, 438, 496),      // ground
+    Girder(10, 180, 323, 180),     // Kong's deck
+    Girder(174, 116, 263, 116),    // Pauline's platform
+    Girder(10, 273, 58, 273),      // upper-left ledge
+    Girder(113, 273, 173, 273),    // long central-left ledge
+    Girder(10, 382, 54, 382),      // lower-left ledge
+    Girder(128, 415, 173, 415),    // central ledge
+    Girder(248, 256, 293, 256),    // first right-hand step
+    Girder(308, 243, 338, 243),
+    Girder(353, 224, 383, 224),
+    Girder(398, 211, 428, 211),
+    Girder(353, 274, 383, 274),
+    Girder(308, 336, 338, 336),
+    Girder(353, 349, 383, 349),
+    Girder(398, 367, 428, 367),
+    Girder(398, 418, 428, 418),
+    Girder(338, 432, 368, 432),
+    Girder(293, 448, 323, 448),    // player start ledge
+    Girder(383, 448, 428, 448),
+    Girder(248, 459, 278, 459),
+  ];
+  const ladder = (x, yTop, yBottom) => ({
+    x, yTop, yBottom, broken: false, effBottom: yBottom,
+  });
+  return {
+    girders: surfaces,
+    platform: surfaces[2],
+    style: 3,
+    startX: 308,
+    startGirder: 17,
+    kongGirder: 1,
+    barrelGirder: 1,
+    hammerPositions: [],
+    elevators: [
+      { x1: 69, x2: 99, trackTop: 180, trackBottom: 496, top: 273, bottom: 479, y: 479, dir: -1, speed: 0.42 },
+      { x1: 188, x2: 218, trackTop: 180, trackBottom: 496, top: 273, bottom: 415, y: 377, dir: 1, speed: 0.42 },
+    ],
+    ladders: [
+      ladder(129, 68, 180),
+      ladder(158, 68, 180),
+      ladder(249, 132, 180),
+      ladder(39, 273, 382),
+      ladder(31, 398, 471),
+      ladder(137, 287, 415),
+      ladder(166, 287, 415),
+      ladder(262, 273, 321),
+      ladder(308, 180, 243),
+      ladder(368, 224, 274),
+      ladder(414, 211, 287),
+      ladder(368, 274, 349),
+      ladder(414, 367, 418),
+      ladder(353, 349, 432),
+      ladder(308, 336, 448),
+    ],
+  };
+}
+
+const levelLayouts = [levelOne, levelTwo, levelThree];
 
 function buildLevel(levelNumber) {
   levelNumber = levelNumber || 1;
@@ -482,6 +549,9 @@ function buildLevel(levelNumber) {
   ladders = data.ladders;
   platform = data.platform;
   activeLayout = data;
+  for (const ladder of ladders) {
+    if (ladder.effBottom == null) ladder.effBottom = ladder.yBottom;
+  }
   DRUM.y = girders[0].yAt(DRUM.x + 10) - 20;   // sit the drum on the ground
 
   // broken ladders stop short: you fall through the missing lower rungs
@@ -494,13 +564,13 @@ function buildLevel(levelNumber) {
 /** Girder a rolling body should sit on at x (nearest surface below y). */
 function surfaceBelow(x, y, maxDrop, skip) {
   let best = null;
-  const all = girders.concat([platform]);
+  const all = girders.concat(girders.includes(platform) ? [] : [platform], G.elevators || []);
   for (const g of all) {
     if (skip && g === skip) continue;
     if (x < g.x1 - 1 || x > g.x2 + 1) continue;
-    const sy = g.yAt(x);
+    const sy = g.elevator ? g.y : g.yAt(x);
     if (sy >= y - 2 && sy <= y + maxDrop) {
-      if (!best || sy < best.y) best = { g, y: sy };
+      if (!best || sy < best.y) best = { g, y: sy, elevator: !!g.elevator };
     }
   }
   return best;
@@ -799,6 +869,7 @@ const G = {
   t: 0, shake: 0,
   player: null, kong: null,
   barrels: [], fireballs: [], hammers: [], items: [], floats: [], parts: [],
+  elevators: [],
   rivets: [], collapseStarted: false, collapseTime: 0,
   spawnT: 0, fireT: 0,
   difficulty: 1,
@@ -812,7 +883,7 @@ function saveHi() {
 function newPlayer() {
   const x = activeLayout ? activeLayout.startX : 78;
   return {
-    x, y: girders[0].yAt(x) - PH, vx: 0, vy: 0,
+    x, y: (girders[activeLayout.startGirder || 0].yAt(x)) - PH, vx: 0, vy: 0,
     onGround: true, climbing: null,
     face: 1, anim: 0, hammer: null, hammerT: 0, swing: 0, swingWait: 0,
     invuln: 0, dead: false,
@@ -826,6 +897,10 @@ function resetLevel(full) {
   }
   G.player = newPlayer();
   G.barrels = []; G.fireballs = []; G.items = []; G.parts = []; G.floats = [];
+  G.elevators = activeLayout.elevators ? activeLayout.elevators.map(e => Object.assign({}, e, {
+    elevator: true,
+    yAt() { return this.y; },
+  })) : [];
   G.spawnT = 90; G.fireT = activeLayout.style === 2 ? 80 : 260;
   G.rivets = [];
   G.collapseStarted = false;
@@ -838,7 +913,7 @@ function resetLevel(full) {
     }
   }
   const kongGirder = girders[activeLayout.kongGirder];
-  const kongX = activeLayout.style === 2 ? 230 : 60;
+  const kongX = activeLayout.style === 2 ? 230 : activeLayout.style === 3 ? 90 : 60;
   G.kong = { x: kongX, y: kongGirder.yAt(kongX) - 30, vy: 0, fall: false, face: 1, anim: 0, throwT: 120, state: 'idle', armT: 0, rage: 0 };
   G.hammers = activeLayout.hammerPositions.map(({ x, gi, y }) => ({
     x, y: y == null ? girders[gi].yAt(x) - 12 : y, taken: false,
@@ -883,6 +958,17 @@ function spawnFireball(fromBarrel) {
       x, y: g.yAt(x) - 10, vx: 0.75 + 0.08 * G.difficulty,
       dir: G.player.x < x ? -1 : 1, floorIndex, climbTarget: null,
       climbDir: -1, climbToFloor: floorIndex, anim: 0, waitT: 0, dead: false,
+    });
+    SFX.fireball();
+    return;
+  }
+  if (activeLayout.style === 3) {
+    const surface = girders[3 + Math.floor(Math.random() * (girders.length - 3))];
+    const x = surface.x1 + 8 + Math.random() * Math.max(1, surface.x2 - surface.x1 - 16);
+    G.fireballs.push({
+      x, y: surface.yAt(x) - 10, vx: 0.65 + 0.08 * G.difficulty,
+      dir: G.player.x < x ? -1 : 1, climbDir: -1,
+      anim: 0, climbTarget: null, waitT: 0, dead: false,
     });
     SFX.fireball();
     return;
@@ -1158,6 +1244,7 @@ function updatePlayer(p) {
   /* ---- climbing ---- */
   if (p.climbing) {
     const l = p.climbing;
+    p.standingOn = null;
     p.x += (l.x - p.x) * 0.4;
     p.vx = 0; p.vy = 0;
     let moved = false;
@@ -1171,6 +1258,7 @@ function updatePlayer(p) {
       const s = surfaceBelow(p.x, l.effBottom - 4, 24);
       p.y = (s ? s.y : l.effBottom) - PH;
       p.onGround = true;
+      p.standingOn = s && s.elevator ? s.g : null;
     }
     if (jump) { p.climbing = null; p.vy = JUMP_V * 0.8; p.onGround = false; SFX.jump(); }
     return;
@@ -1181,14 +1269,14 @@ function updatePlayer(p) {
     for (const l of laddersNear(p.x, 9)) {
       if (!l.broken && p.y + PH >= l.yBottom - 10 && p.y + PH <= l.yBottom + 4) {
         // grab at the foot and climb up — no teleport to the top
-        p.climbing = l; p.x = l.x; p.y = l.yBottom - PH; p.vy = 0; return;
+        p.climbing = l; p.standingOn = null; p.x = l.x; p.y = l.yBottom - PH; p.vy = 0; return;
       }
     }
   }
   if (down) {
     for (const l of laddersNear(p.x, 9)) {
       if (Math.abs((p.y + PH) - l.yTop) < 9) {
-        p.climbing = l; p.x = l.x; p.y = l.yTop + 2; p.vy = 0; return;
+        p.climbing = l; p.standingOn = null; p.x = l.x; p.y = l.yTop + 2; p.vy = 0; return;
       }
     }
   }
@@ -1202,6 +1290,7 @@ function updatePlayer(p) {
   if (jump && p.onGround) {
     p.vy = JUMP_V * (p.hammer ? 0.9 : 1);
     p.onGround = false;
+    p.standingOn = null;
     SFX.jump();
   }
 
@@ -1216,11 +1305,13 @@ function updatePlayer(p) {
   const prevFeet = p.y + PH;
   p.y += p.vy;
   p.onGround = false;
+  p.standingOn = null;
 
   if (p.vy >= 0) {
     const s = surfaceBelow(p.x, prevFeet - 3, p.vy + 6);
     if (s && (p.y + PH) >= s.y) {
       p.y = s.y - PH; p.vy = 0; p.onGround = true;
+      p.standingOn = s.elevator ? s.g : null;
     }
   }
   // No ceiling collision: a jump is never cut short by the girder above, so the
@@ -1277,12 +1368,28 @@ function updateCollapse() {
   p.y += (platform.y - PH - p.y) * 0.055;
   p.vx = p.vy = 0;
   p.onGround = true;
-  if (G.mode === 'collapse' && G.modeT > 150) {
-    p.x = rescueX;
-    p.y = platform.y - PH;
-    G.mode = 'win';
-    G.modeT = 0;
-    burst(p.x, p.y, COL.clear, 40, 4);
+  if (G.modeT > 150) {
+    G.level++;
+    G.difficulty = 1 + G.level * 0.35;
+    buildLevel(G.level);
+    resetLevel(false);
+    setMode('ready');
+  }
+}
+
+function updateElevators() {
+  const p = G.player;
+  for (const elevator of G.elevators) {
+    const previousY = elevator.y;
+    elevator.y += elevator.dir * elevator.speed;
+    if (elevator.y <= elevator.top) {
+      elevator.y = elevator.top;
+      elevator.dir = 1;
+    } else if (elevator.y >= elevator.bottom) {
+      elevator.y = elevator.bottom;
+      elevator.dir = -1;
+    }
+    if (p.standingOn === elevator) p.y += elevator.y - previousY;
   }
 }
 
@@ -1293,7 +1400,7 @@ function updateKong(k) {
   k.anim += 0.05;
   if (k.armT > 0) k.armT--;
   if (G.mode !== 'play') return;
-  if (activeLayout.style === 2) {
+  if (activeLayout.style !== 1 && activeLayout.style !== 3) {
     k.face = G.player.x < k.x ? -1 : 1;
     return;
   }
@@ -1601,7 +1708,7 @@ function drawItem(it) {
 }
 
 function drawOilDrum() {
-  if (activeLayout.style === 2) return;
+  if (activeLayout.style !== 1) return;
   const x = DRUM.x, y = DRUM.y;
   drawSprite(SP_DRUM, x, y, false, 2);
   // flames licking out of the open top
@@ -1649,6 +1756,7 @@ function update() {
         G.bonus = Math.max(0, G.bonus - 100);
         if (G.bonus > 0 && G.bonus % 500 === 0) SFX.bonus();
       }
+      updateElevators();
       updatePlayer(G.player);
       if (G.mode !== 'play') break;
       updateRivets(G.player);
@@ -1661,7 +1769,7 @@ function update() {
       G.hammers = G.hammers.filter(h => !h.taken);   // a taken hammer is gone for good
       checkHits();
       // spawners
-      if (activeLayout.style !== 2 && --G.spawnT <= 0) {
+      if (activeLayout.style === 1 && --G.spawnT <= 0) {
         spawnBarrel();
         G.spawnT = (Math.max(48, 120 - G.level * 10) + Math.random() * 70) * BARREL_RATE;
       }
@@ -1694,11 +1802,15 @@ function update() {
 
     case 'complete':
       if (G.modeT > 190) {
-        G.level++;
-        G.difficulty = 1 + G.level * 0.35;
-        buildLevel(G.level);
-        resetLevel(false);
-        setMode('ready');
+        if (G.level >= levelLayouts.length) {
+          setMode('win');
+        } else {
+          G.level++;
+          G.difficulty = 1 + G.level * 0.35;
+          buildLevel(G.level);
+          resetLevel(false);
+          setMode('ready');
+        }
       }
       break;
 
@@ -1745,6 +1857,7 @@ function render() {
   drawStatic();
   begin();
   drawFallingChunks();
+  drawElevators();
   flush();
 
   // pass 3: entities
@@ -1752,7 +1865,7 @@ function render() {
   drawRivets();
   drawHammerPickups();
   drawPauline();
-  if (activeLayout.style !== 2) drawBarrelStack(G.kong);
+  if (activeLayout.style === 1) drawBarrelStack(G.kong);
   drawKong(G.kong);
   for (const it of G.items) drawItem(it);
   for (const b of G.barrels) drawBarrelShape(b.x + BARREL_W / 2, b.y + BARREL_H / 2, b.spin, b.onGround ? b.roll : 0, BARREL_SCALE);
